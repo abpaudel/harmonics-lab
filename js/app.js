@@ -65,6 +65,12 @@
   }
 
   /* ------------------------------------------------------------------ App */
+  const PRESETS = [
+    ['Sa drone', [0]], ['Sa–Pa drone', [0, 7, 12]], ['Octave', [0, 12]], ['Fifth', [0, 7]], ['Fourth', [0, 5]],
+    ['Major 3rd', [0, 4]], ['Minor 3rd', [0, 3]], ['Major 6th', [0, 9]], ['Tritone', [0, 6]], ['Minor 2nd', [0, 1]],
+    ['Major 2nd', [0, 2]], ['Major triad', [0, 4, 7]], ['Minor triad', [0, 3, 7]], ['Dominant 7th', [0, 4, 7, 10]], ['Cluster', [0, 1, 2]],
+  ];
+
   const app = {
     settings: loadSettings(),
     engine: new A.AudioEngine(),
@@ -343,9 +349,18 @@
     afterToneChange() {
       const tl = this.engine.toneLab;
       document.querySelectorAll('#keyboard .key').forEach(k => k.classList.toggle('on', tl.notes.has(+k.dataset.step)));
+      const ap = this.activePreset();
+      document.querySelectorAll('#tlPresets button[data-p]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.p === ap)));
       $('btnTone').setAttribute('aria-pressed', String(!$('toneLab').hidden));
       if (!tl.notes.size) this.tracker.clear();
       this.requestRender();
+    },
+
+    /** Index of the preset whose notes exactly match what's sounding, or -1. */
+    activePreset() {
+      const tl = this.engine.toneLab;
+      if (!tl || !tl.notes.size) return -1;
+      return PRESETS.findIndex(([, st]) => st.length === tl.notes.size && st.every(x => tl.notes.has(x)));
     },
 
     syncToneLab() {
@@ -586,15 +601,13 @@
     });
     $('tlAllOff').addEventListener('click', () => { if (app.engine.toneLab) { app.engine.toneLab.allOff(); app.afterToneChange(); } });
 
-    const presets = [
-      ['Sa drone', [0]], ['Sa–Pa drone', [0, 7, 12]], ['Octave', [0, 12]], ['Fifth', [0, 7]], ['Fourth', [0, 5]],
-      ['Major 3rd', [0, 4]], ['Minor 3rd', [0, 3]], ['Major 6th', [0, 9]], ['Tritone', [0, 6]], ['Minor 2nd', [0, 1]],
-      ['Major 2nd', [0, 2]], ['Major triad', [0, 4, 7]], ['Minor triad', [0, 3, 7]], ['Dominant 7th', [0, 4, 7, 10]], ['Cluster', [0, 1, 2]],
-    ];
-    $('tlPresets').innerHTML = presets.map(([n], i) => `<button data-p="${i}">${n}</button>`).join('');
+    $('tlPresets').innerHTML = PRESETS.map(([n], i) => `<button type="button" data-p="${i}" aria-pressed="false">${n}</button>`).join('');
     $('tlPresets').addEventListener('click', e => {
       const b = e.target.closest('button[data-p]');
-      if (b) app.setChord(presets[+b.dataset.p][1]);
+      if (!b) return;
+      const i = +b.dataset.p;
+      if (app.activePreset() === i) { app.engine.toneLab.allOff(); app.afterToneChange(); }
+      else app.setChord(PRESETS[i][1]);
     });
     $('keyboard').addEventListener('pointerdown', e => {
       const k = e.target.closest('.key');

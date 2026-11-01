@@ -269,6 +269,7 @@ legend { color: var(--accent); font-size: 12px; text-transform: uppercase; lette
   background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text-2);
 }
 .tonelab-presets button:hover { color: var(--text); border-color: var(--accent); }
+.tonelab-presets button[aria-pressed="true"] { color: #001a24; background: var(--accent); border-color: var(--accent); }
 .tl-hint { margin-top: 6px; font-size: 11.5px; }
 
 .keyboard { position: relative; height: 104px; user-select: none; touch-action: manipulation; }
