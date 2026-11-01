@@ -263,7 +263,10 @@ legend { color: var(--accent); font-size: 12px; text-transform: uppercase; lette
 .tonelab-head output { font-family: var(--mono); color: var(--text); min-width: 2.2em; text-align: right; }
 .tonelab-head #tlCollapse { margin-left: auto; }
 .tonelab-presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-.tonelab.collapsed .tonelab-presets, .tonelab.collapsed .keyboard, .tonelab.collapsed .tl-hint { display: none; }
+.tonelab.collapsed .tonelab-presets, .tonelab.collapsed .keyboard, .tonelab.collapsed .tl-hint, .tonelab.collapsed .tl-about { display: none; }
+.tonelab-head label.off { opacity: .45; }
+.tl-about { margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-3); max-width: 110ch; }
+.tl-about b { color: var(--text-2, var(--text)); font-weight: 600; }
 .tonelab-presets button {
   font-size: 12px; padding: 4px 9px; border-radius: 999px; cursor: pointer;
   background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text-2);

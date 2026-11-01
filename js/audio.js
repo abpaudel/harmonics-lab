@@ -2,8 +2,8 @@
  * audio.js — Web Audio plumbing.
  *  - A capture tap (AudioWorklet, with ScriptProcessor fallback) copies everything
  *    routed to `engine.input` into a ring buffer that the analyser reads.
- *  - Sources: microphone (all browser processing disabled), the Tone Lab additive
- *    synthesiser, and audio files.
+ *  - Sources: microphone (all browser processing disabled), the Tone Lab instrument
+ *    synthesiser (models in synth.js), and audio files.
  */
 (function (root) {
   'use strict';
@@ -44,15 +44,21 @@
     get sampleRate() { return this.ctx ? this.ctx.sampleRate : 48000; }
 
     async ensure() {
-      if (!this.ctx) {
-        const AC = root.AudioContext || root.webkitAudioContext;
-        this.ctx = new AC({ latencyHint: 'interactive' });
-        this.input = this.ctx.createGain();
-        this.monitor = this.ctx.createGain(); // to speakers (tone lab / file only)
-        this.monitor.connect(this.ctx.destination);
-        await this._setupTap();
-        this.toneLab = new ToneLab(this.ctx, [this.input, this.monitor]);
+      if (!this._ready) {
+        // Memoised, so concurrent callers all wait for the full setup.
+        this._ready = (async () => {
+          const AC = root.AudioContext || root.webkitAudioContext;
+          this.ctx = new AC({ latencyHint: 'interactive' });
+          this.input = this.ctx.createGain();
+          this.monitor = this.ctx.createGain(); // to speakers (tone lab / file only)
+          this.monitor.connect(this.ctx.destination);
+          await this._setupTap();
+          const tl = new ToneLab(this.ctx, [this.input, this.monitor]);
+          await tl.init();
+          this.toneLab = tl;
+        })();
       }
+      await this._ready;
       if (this.ctx.state === 'suspended') await this.ctx.resume();
     }
 
@@ -183,97 +189,89 @@
   }
 
   /* ------------------------------------------------------------- Tone Lab */
-  // Harmonic amplitude recipes. `f` is the note frequency (for formant timbres).
-  const TIMBRES = {
-    sine: { label: 'Sine (pure tone)', amp: h => (h === 1 ? 1 : 0) },
-    saw: { label: 'Bright / bowed string (1/n)', amp: h => 1 / h },
-    reed: { label: 'Reed / harmonium (rich)', amp: h => Math.pow(h, -0.6) },
-    square: { label: 'Clarinet-like (odd only)', amp: h => (h % 2 ? 1 / h : 0) },
-    triangle: { label: 'Soft flute (odd, 1/n²)', amp: h => (h % 2 ? 1 / (h * h) : 0) },
-    voice: {
-      label: 'Voice "aah" (formants)',
-      amp: (h, f) => {
-        const fr = h * f;
-        const bump = (fc, bw, g) => g * Math.exp(-0.5 * Math.pow(Math.log2(fr / fc) / bw, 2));
-        return (0.15 + bump(730, 0.35, 1) + bump(1090, 0.3, 0.6) + bump(2440, 0.25, 0.25)) / Math.sqrt(h);
-      },
-    },
-    pluck: { label: 'Plucked string (1/n²·sin)', amp: h => Math.abs(Math.sin(Math.PI * h * 0.2)) / (h * 0.8 + 0.2) },
-  };
+  // The instrument models live in synth.js. Their factory is self-contained, so it is
+  // stringified into an AudioWorklet module (synthesis off the main thread); without
+  // AudioWorklet the same engine runs in a ScriptProcessor.
+  const S = root.HSynth;
+  const SYNTH_WORKLET = () => `const HSynth = (${S.factory.toString()})();
+    class HarmonicsSynth extends AudioWorkletProcessor {
+      constructor() { super(); this.engine = new HSynth.Engine(sampleRate); this.port.onmessage = e => this.engine.handle(e.data); }
+      process(inputs, outputs) {
+        const out = outputs[0] && outputs[0][0];
+        if (out) { out.fill(0); this.engine.render(out, out.length); }
+        return true;
+      }
+    }
+    registerProcessor('harmonics-synth', HarmonicsSynth);`;
 
   class ToneLab {
     constructor(ctx, outputs) {
       this.ctx = ctx;
       this.out = ctx.createGain();
-      this.out.gain.value = 0.8;
+      this.out.gain.value = 1;
       outputs.forEach(o => this.out.connect(o));
-      this.notes = new Map(); // id -> {freq, master, oscs:[{osc, gain, h}]}
+      this.notes = new Map(); // id -> {freq}
       this.timbre = 'saw';
       this.nHarm = 12;
       this.inharm = 0;
+      this.vibrato = true;
+      this.restrike = true;
     }
 
-    amps(freq) {
-      const t = TIMBRES[this.timbre] || TIMBRES.saw;
-      const a = [];
-      for (let h = 1; h <= this.nHarm; h++) {
-        const f = h * freq * Math.sqrt(1 + this.inharm * h * h);
-        a.push(f < this.ctx.sampleRate / 2 - 200 ? t.amp(h, freq) : 0);
+    async init() {
+      const ctx = this.ctx;
+      try {
+        if (!ctx.audioWorklet) throw new Error('no worklet');
+        const src = SYNTH_WORKLET();
+        try {
+          await ctx.audioWorklet.addModule('data:application/javascript;charset=utf-8,' + encodeURIComponent(src));
+        } catch (e) {
+          const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+          try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+        }
+        const node = new AudioWorkletNode(ctx, 'harmonics-synth', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+        node.connect(this.out);
+        this.send = m => node.port.postMessage(m);
+        this.kind = 'AudioWorklet';
+      } catch (err) {
+        const engine = new S.Engine(ctx.sampleRate);
+        const sp = ctx.createScriptProcessor(1024, 1, 1);
+        sp.onaudioprocess = e => { const o = e.outputBuffer.getChannelData(0); o.fill(0); engine.render(o, o.length); };
+        // a ScriptProcessor only runs while its input is connected
+        const silent = ctx.createConstantSource(); silent.offset.value = 0; silent.connect(sp); silent.start();
+        sp.connect(this.out);
+        this.send = m => engine.handle(m);
+        this.kind = 'ScriptProcessor';
       }
-      const sum = a.reduce((s, x) => s + x, 0) || 1;
-      return a.map(x => x / sum);
+      this.setOptions();
     }
+
+    setOptions() { this.send({ t: 'opts', vibrato: this.vibrato, restrike: this.restrike }); }
+
+    /** Tune the shared sympathetic strings (sitar taraf, sarangi) to these frequencies. */
+    setSympathetic(freqs) { this.send({ t: 'symp', freqs }); }
 
     noteOn(id, freq) {
       if (this.notes.has(id)) { this.setFreq(id, freq); return; }
-      const ctx = this.ctx, now = ctx.currentTime;
-      const master = ctx.createGain();
-      master.gain.setValueAtTime(0, now);
-      master.gain.linearRampToValueAtTime(0.22, now + 0.04);
-      master.connect(this.out);
-      const amps = this.amps(freq);
-      const oscs = [];
-      amps.forEach((a, i) => {
-        const h = i + 1;
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.value = h * freq * Math.sqrt(1 + this.inharm * h * h);
-        const g = ctx.createGain();
-        g.gain.value = a;
-        osc.connect(g); g.connect(master);
-        osc.start(now);
-        oscs.push({ osc, gain: g, h });
-      });
-      this.notes.set(id, { freq, master, oscs });
+      this.notes.set(id, { freq });
+      this.send({ t: 'on', id, freq, inst: this.timbre, nHarm: this.nHarm, inharm: this.inharm });
     }
 
     setFreq(id, freq) {
       const n = this.notes.get(id);
       if (!n) return;
       n.freq = freq;
-      const t = this.ctx.currentTime;
-      const amps = this.amps(freq);
-      n.oscs.forEach(o => {
-        o.osc.frequency.setTargetAtTime(o.h * freq * Math.sqrt(1 + this.inharm * o.h * o.h), t, 0.015);
-        o.gain.gain.setTargetAtTime(amps[o.h - 1] || 0, t, 0.015);
-      });
+      this.send({ t: 'freq', id, freq });
     }
 
     noteOff(id) {
-      const n = this.notes.get(id);
-      if (!n) return;
-      this.notes.delete(id);
-      const t = this.ctx.currentTime;
-      n.master.gain.cancelScheduledValues(t);
-      n.master.gain.setValueAtTime(n.master.gain.value, t);
-      n.master.gain.linearRampToValueAtTime(0, t + 0.08);
-      n.oscs.forEach(o => o.osc.stop(t + 0.1));
-      setTimeout(() => n.master.disconnect(), 300);
+      if (!this.notes.delete(id)) return;
+      this.send({ t: 'off', id });
     }
 
     allOff() { [...this.notes.keys()].forEach(id => this.noteOff(id)); }
 
-    /** Rebuild sounding notes after a timbre change. */
+    /** Rebuild sounding notes after an instrument / harmonics change. */
     refresh() {
       const cur = [...this.notes.entries()].map(([id, n]) => [id, n.freq]);
       cur.forEach(([id]) => this.noteOff(id));
@@ -281,5 +279,5 @@
     }
   }
 
-  root.HAudio = { AudioEngine, ToneLab, TIMBRES };
+  root.HAudio = { AudioEngine, ToneLab, INSTRUMENTS: S.INSTRUMENTS };
 })(typeof self !== 'undefined' ? self : this);

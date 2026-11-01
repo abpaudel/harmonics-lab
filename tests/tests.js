@@ -10,6 +10,7 @@
   const P = isNode ? require('../js/pitch.js') : self.HPitch;
   const M = isNode ? require('../js/music.js') : self.HMusic;
   const X = isNode ? require('../js/dissonance.js') : self.HDiss;
+  const S = isNode ? require('../js/synth.js') : self.HSynth;
 
   const results = [];
   function test(name, fn) {
@@ -335,6 +336,123 @@
       const v = { m2: d(et(1)), M2: d(et(2)), M3et: d(et(4)), M3just: d(5 / 4), P5et: d(et(7)), P5just: d(1.5), P8: d(2) };
       assert(v.m2 > v.M2 && v.M2 > v.M3et && v.M3et > v.M3just && v.M3just > v.P5et && v.P5et > v.P5just && v.P5just > v.P8, JSON.stringify(v));
       return Object.entries(v).map(([k, x]) => `${k} ${x.toFixed(3)}`).join(', ');
+    });
+  }
+
+
+  /* --------------------------------------------------------- Tone Lab synth */
+  if (S) {
+    /** Render an instrument offline through the same engine the AudioWorklet runs. */
+    function play(inst, notes, secs, { vibrato = false, restrike = true, symp } = {}) {
+      const e = new S.Engine(SR, 4242);
+      e.handle({ t: 'opts', vibrato, restrike });
+      if (symp) e.handle({ t: 'symp', freqs: symp });
+      notes.forEach((f, id) => e.handle({ t: 'on', id, freq: f, inst, nHarm: 12, inharm: 0 }));
+      const n = Math.round(secs * SR), out = new Float32Array(n);
+      for (let i = 0; i < n; i += 128) e.render(out.subarray(i, Math.min(n, i + 128)), Math.min(128, n - i));
+      return out;
+    }
+    const analyseAt = (x, t, fftSize = 16384) => {
+      const an = new D.Analyzer({ sampleRate: SR, fftSize, windowType: 'hann' });
+      const r = an.process(x, { minFreq: 25, maxFreq: 12000, rangeDb: 90 }, Math.round(t * SR));
+      return { r, voices: P.detectVoices(r.peaks, { polyphonic: true }) };
+    };
+    const levelAt = (r, f) => { const p = r.peaks.filter(q => Math.abs(q.freq / f - 1) < 0.012); return p.length ? Math.max(...p.map(q => q.db)) : -150; };
+
+    const scale = [NOTE.G3, NOTE.C4, NOTE.A4].map(noteF);
+    test(`Every Tone Lab instrument (${Object.keys(S.INSTRUMENTS).length}) sounds exactly one note at the requested pitch (G3, C4, A4)`, () => {
+      const worst = [];
+      for (const inst of Object.keys(S.INSTRUMENTS)) {
+        for (const f of scale) {
+          const x = play(inst, [f], 1.3);
+          let pk = 0;
+          for (const v of x) { assert(Number.isFinite(v), `${inst}: non-finite sample`); pk = Math.max(pk, Math.abs(v)); }
+          assert(pk > 0.02 && pk < 0.95, `${inst} @ ${f.toFixed(1)} Hz: peak ${pk.toFixed(3)}`);
+          const { voices } = analyseAt(x, 1.2);
+          expectVoices(voices, [f], 1.5, `${inst} @ ${f.toFixed(1)} Hz`);
+          worst.push(Math.abs(cents(voices[0].f0, f)));
+        }
+      }
+      return `max error ${Math.max(...worst).toFixed(2)}¢ over ${worst.length} notes`;
+    });
+
+    test('Instrument chords: a just C major triad on piano, harmonium, sitar and violin resolves to its three notes', () => {
+      const tri = [noteF(NOTE.C4), noteF(NOTE.C4) * 5 / 4, noteF(NOTE.C4) * 3 / 2];
+      for (const inst of ['piano', 'harmonium', 'sitar', 'violin']) {
+        const { voices } = analyseAt(play(inst, tri, 1.3), 1.2);
+        expectVoices(voices, tri, 2, inst);
+      }
+    });
+
+    test('Piano partials are stretched by stiffness; the fitted inharmonicity matches the model (C3)', () => {
+      const f0 = noteF(NOTE.C3), B = S._specs.piano.B(f0); // measured from a recording when calibrated
+      const { r } = analyseAt(play('piano', [f0], 1.0), 0.95, 32768);
+      const exp = n => n * f0 * Math.sqrt((1 + B * n * n) / (1 + B));
+      const n = 12;
+      const p = r.peaks.filter(q => Math.abs(cents(q.freq, exp(n))) < 15).sort((a, b) => b.db - a.db)[0];
+      assert(p, 'no 12th partial found');
+      const stretch = cents(p.freq, n * f0);
+      near(p.freq, exp(n), 1.5, 'partial 12');
+      assert(stretch > 1.5, `partial 12 only ${stretch.toFixed(1)}¢ sharp`);
+      return `partial 12 is ${stretch.toFixed(1)}¢ above 12·f0 (B = ${B.toExponential(1)})`;
+    });
+
+    test('Clarinet: odd harmonics dominate the low register (closed cylindrical bore)', () => {
+      const f0 = noteF(NOTE.G3);
+      const { r } = analyseAt(play('clarinet', [f0], 1), 0.9);
+      const odd = [1, 3, 5].map(h => levelAt(r, h * f0)), even = [2, 4].map(h => levelAt(r, h * f0));
+      assert(Math.min(...odd) - Math.max(...even) > 10, `odd ${odd.map(Math.round)} even ${even.map(Math.round)}`);
+      return `odd ${odd.map(Math.round).join('/')} dB, even ${even.map(Math.round).join('/')} dB`;
+    });
+
+    test('Sitar jawari keeps high harmonics alive: h10–h20 at 2 s are far stronger than without the bridge', () => {
+      const f0 = noteF(NOTE.C3);
+      const hi = inst => {
+        const { r } = analyseAt(play(inst, [f0], 2.2, { restrike: false }), 2.1);
+        const ref = levelAt(r, f0);
+        let e = 0; for (let h = 10; h <= 20; h++) e += 10 ** ((levelAt(r, h * f0) - ref) / 10);
+        return 10 * Math.log10(e);
+      };
+      const spec = S._specs.sitar, jaw = spec.jaw;
+      const withJ = hi('sitar');
+      spec.jaw = 0;
+      let without;
+      try { without = hi('sitar'); } finally { spec.jaw = jaw; }
+      assert(withJ - without > 6, `with ${withJ.toFixed(1)} dB, without ${without.toFixed(1)} dB`);
+      return `h10–20 energy ${withJ.toFixed(1)} dB vs ${without.toFixed(1)} dB re h1`;
+    });
+
+    test('Tanpura plucks latched strings one at a time, in turn (first string at once, then the next two ~1 s apart)', () => {
+      // (C3, G3, D4 rather than an octave so no string is another's harmonic)
+      const fs = [noteF(NOTE.C3), noteF(NOTE.G3), noteF(NOTE.D4)];
+      const x = play('tanpura', fs, 3.5);
+      // onset of each string = first time its fundamental is detected
+      const first = fs.map(() => null);
+      for (let t = 0.25; t < 3.5; t += 0.1) {
+        const { voices } = analyseAt(x, t, 8192);
+        fs.forEach((f, i) => { if (first[i] == null && voices.some(v => Math.abs(cents(v.f0, f)) < 30)) first[i] = t; });
+      }
+      assert(first.every(v => v != null), 'a string never sounded: ' + first);
+      assert(first[0] < first[1] && first[1] < first[2] && first[2] - first[1] > 0.7 && first[2] < 2.8, 'onsets ' + first.map(v => v.toFixed(1)));
+      return 'onsets ' + first.map(v => v.toFixed(1) + ' s').join(', ');
+    });
+
+    test('Vibrato on: violin pitch swings by about its set depth; off: steady (within the 85 ms analysis noise)', () => {
+      const f0 = noteF(NOTE.A4);
+      const track = vib => {
+        const x = play('violin', [f0], 2.2, { vibrato: vib });
+        const c = [];
+        for (let t = 1.0; t < 2.2; t += 0.02) {
+          const { voices } = analyseAt(x, t, 4096);
+          if (voices.length) c.push(cents(voices[0].f0, f0));
+        }
+        return Math.max(...c) - Math.min(...c);
+      };
+      const on = track(true), off = track(false);
+      const depth = S._specs.violin.vib.depth; // ±¢, measured from recordings when calibrated
+      assert(on > depth && on < 4 * depth + 20, `vibrato swing ${on.toFixed(1)}¢ for depth ±${depth}¢`);
+      assert(off < 4, `steady swing ${off.toFixed(2)}¢`);
+      return `peak-to-peak ${on.toFixed(1)}¢ with vibrato, ${off.toFixed(2)}¢ without`;
     });
   }
 

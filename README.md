@@ -26,7 +26,17 @@ Live demo is hosted at: https://abpaudel.com/harmonics-lab/
 | **Spectrogram** | Scrolling time × log-frequency picture, with traces of the detected fundamentals. |
 | **Tuning explorer** | 12-TET, 5-limit Just, Pythagorean, ¼-comma Meantone, Werckmeister III, 7-limit, the 22 shrutis, and where harmonics 1–32 fall inside an octave. A table gives cents, ratios and offsets from ET; click a cell to hear Sa plus that degree in that tuning. |
 
-**Tone Lab** (keyboard button) plays notes and chords with chosen timbre, harmonic count and string stiffness (inharmonicity), tuned in the selected **tuning system** and **Sa**. Change the tuning while a chord sounds and watch the beating partials appear or vanish.
+**Tone Lab** (keyboard button) plays notes and chords tuned in the selected **tuning system** and **Sa**. Change the tuning while a chord sounds and watch the beating partials appear or vanish. It offers pure tones (sine, sawtooth, square, triangle, with adjustable harmonic count and inharmonicity) and modelled instruments:
+
+| Instrument | Model |
+|---|---|
+| **Guitar, Sitar, Tanpura, Veena** | Digital waveguide string (extended Karplus–Strong, Jaffe & Smith 1983): a one-period delay line, frequency-dependent loss filter, Lagrange fractional delay with the loop's phase delay compensated (so the pitch is exact), pluck-position comb and body resonances. Sitar, tanpura and veena add a **jawari** bridge. The string's own displacement shortens its length (Siddiq 2012), which keeps feeding the high harmonics that give the buzzing zing. Sitar (and sarangi) drive a bank of sympathetic **taraf** strings tuned to the current Sa and tuning. Latched tanpura notes are plucked in turn, as in the classic cycle. |
+| **Piano, Santoor** | Modal synthesis: stiff-string partials *f*ₙ = *n f*₀ √(1+B*n*²) with register-dependent B, hammer position and felt low-pass, decay σ = b₁ + b₃*f*² (Chaigne & Askenfelt 1994), detuned unison strings giving beats and the two-stage decay (Weinreich 1977), hammer thump. |
+| **Tabla (dayan)** | The syahi-loaded membrane's first five modes, harmonic 1:2:3:4:5 as Raman showed, each a slightly split pair, plus fast inharmonic modes and a slap. |
+| **Violin, Cello, Sarangi** | Helmholtz-motion source through a dense, irregular body response with a bridge hill (Mathews & Kohut 1973), or skin-membrane formants for sarangi. Vibrato moves every partial across the resonances, so harmonics shimmer as on a real instrument. Bow noise and attack scratch. |
+| **Flute, Bansuri, Clarinet, Oboe, Shehnai, Trumpet, Pipe organ, Harmonium, Voice** | Spectral modelling: deterministic harmonics plus noise (Serra 1989). Source spectrum × body/formant response, breath noise broadband and around the harmonics, attack chiff, brass and reed brightness rising with level (Risset & Mathews 1969), clarinet odd harmonics below the tone-hole cutoff, Klatt cascade formants for the voice. |
+
+All models run in an AudioWorklet. Every note sounds at exactly the requested frequency: winds and bows are not self-oscillating physical models, which drift by several cents. **Vibrato** can be switched off for perfectly steady pitch. **Re-strike** keeps re-plucking latched notes of decaying instruments so chords stay visible.
 
 ### Controls
 
@@ -43,7 +53,7 @@ Live demo is hosted at: https://abpaudel.com/harmonics-lab/
 5. **Notes.** Notes are found by harmonic summation with iterative explanation, after Klapuri. Candidates are peaks and their sub-multiples. Each candidate's series is tracked upward by **extrapolating the measured partial spacing**, so stretched piano partials are followed with a tight tolerance. Missing low harmonics are penalised, and sub-octave "ghost" notes and vibrato sidebands are rejected.
 6. **Roughness** is the Sethares (1993) parameterisation of Plomp & Levelt, summed over all partial pairs and normalised to the loudest partial.
 
-### Validation (`tests/tests.html`, 53 checks, all passing in Chrome and Firefox)
+### Validation (`tests/tests.html`, 60 checks)
 
 - Pure tones at 300 random frequencies: worst error 0.016¢, 0.003 dB (Hann) and 0.017¢, 0.007 dB (Blackman-Harris).
 - Single notes E2–C6 with sawtooth, odd-only, sine, weak-fundamental and bright spectra: all within 0.02¢.
@@ -51,6 +61,7 @@ Live demo is hosted at: https://abpaudel.com/harmonics-lab/
 - Stiff strings (B = 0.0004 and 0.001, partials stretched up to 290¢) are fully tracked. Singer vibrato (±17¢) gives one note and no ghosts.
 - Music theory: note naming, cents, sargam with saptak, just/Werckmeister degrees (A stays at 440), sargam-aware spelling, compound intervals, harmonic offsets.
 - Roughness: maximum at ~¼ critical band; dissonance-curve minima at 6/5, 5/4, 4/3, 3/2, 5/3, 2/1; m2 > M2 > ET M3 > just M3 > ET P5 > just P5 > octave.
+- Tone Lab: all 23 instruments, rendered offline by the same engine, are detected as exactly one note at G3, C4 and A4 (worst error ≈0.6¢). Just triads on piano, harmonium, sitar and violin resolve to three notes. Piano partials stretch as the model's B predicts. Clarinet odd harmonics are >10 dB above even ones. The sitar's jawari keeps h10–h20 more than 6 dB stronger than the same string without it. Tanpura strings are plucked in turn. Violin vibrato swings about ±15¢ and the pitch is steady with vibrato off.
 
 A randomized stress test (random spectra, 44.1 kHz, noise, vibrato) gives 100% correct notes for single notes and two-note chords. Three-note chords are 86–87% correct; every miss was an **octave doubling**, which cannot be separated in principle.
 
@@ -69,7 +80,8 @@ js/dsp.js           FFT, windows, peak detection, phase-vocoder refinement
 js/pitch.js         multi-note fundamental detection
 js/music.js         tunings, note names, sargam, shrutis, intervals
 js/dissonance.js    Plomp–Levelt / Sethares roughness & dissonance curves
-js/audio.js         mic / file / Tone Lab synth, capture worklet
+js/audio.js         mic / file / Tone Lab plumbing, capture worklet
+js/synth.js         Tone Lab instrument models (runs in an AudioWorklet)
 js/ui.js            drawing & formatting helpers
 js/views/*.js       spectrum, ladder, overlap, curve, spectrogram, tuning
 js/app.js           state, analysis loop, side panels, controls

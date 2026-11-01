@@ -10,7 +10,7 @@
     fft: 16384, window: 'hann', thresh: 15, range: 60, gate: -70, poly: true, maxVoices: 4, minF0: 50, smooth: 0.5,
     fMin: 50, fMax: 6000, dbMin: -100, maxHarm: 16, spell: 'sharps', script: 'latin', saFine: 0,
     roughStrip: true, tunedTicks: true, tonicPc: 0, tuning: 'et', a4: 440, sargam: true, device: '',
-    tlTimbre: 'saw', tlHarm: 12, tlInh: 0, tlOct: 0, tlMonitor: true,
+    tlTimbre: 'saw', tlHarm: 12, tlInh: 0, tlOct: 0, tlMonitor: true, tlVib: true, tlRestrike: true,
   };
   const STORE = 'harmonics-lab-settings-v1';
 
@@ -19,6 +19,9 @@
     try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { saved = {}; }
     const s = { ...DEFAULTS };
     for (const k of Object.keys(DEFAULTS)) if (k in saved && typeof saved[k] === typeof DEFAULTS[k]) s[k] = saved[k];
+    // timbres from before the instrument models
+    s.tlTimbre = { reed: 'harmonium', pluck: 'guitar' }[s.tlTimbre] || s.tlTimbre;
+    if (!A.INSTRUMENTS[s.tlTimbre]) s.tlTimbre = DEFAULTS.tlTimbre;
     return s;
   }
   function saveSettings(s) { try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e) { /* storage unavailable */ } }
@@ -366,16 +369,29 @@
     syncToneLab() {
       const tl = this.engine.toneLab, s = this.settings;
       if (!tl) return;
-      const changed = tl.timbre !== s.tlTimbre || tl.nHarm !== s.tlHarm || tl.inharm !== s.tlInh * 2.5e-5;
+      const pure = A.INSTRUMENTS[s.tlTimbre].pure;
+      // harmonics / inharmonicity only shape the pure tones; instruments model their own
+      const changed = tl.timbre !== s.tlTimbre || (pure && (tl.nHarm !== s.tlHarm || tl.inharm !== s.tlInh * 2.5e-5));
       tl.timbre = s.tlTimbre; tl.nHarm = s.tlHarm; tl.inharm = s.tlInh * 2.5e-5;
+      if (tl.vibrato !== s.tlVib || tl.restrike !== s.tlRestrike) { tl.vibrato = s.tlVib; tl.restrike = s.tlRestrike; tl.setOptions(); }
+      if (!this._sympTuned) this.tuneSympathetic();
       if (changed) tl.refresh();
       this.engine.setMonitor(s.tlMonitor);
+    },
+
+    /** Sympathetic strings (sitar taraf, sarangi) follow Sa and the tuning: Bilawal scale, middle to upper octave. */
+    tuneSympathetic() {
+      const tl = this.engine.toneLab;
+      if (!tl) return;
+      tl.setSympathetic([0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 19].map(st => this.keyFreq(st)));
+      this._sympTuned = true;
     },
 
     retuneToneLab() {
       const tl = this.engine.toneLab;
       if (!tl) return;
       for (const id of tl.notes.keys()) tl.setFreq(id, this.keyFreq(id));
+      this.tuneSympathetic();
     },
 
     async setChord(steps) {
@@ -579,9 +595,29 @@
   function bindToneLab() {
     const s = app.settings;
     const selT = $('tlTimbre');
-    selT.innerHTML = Object.entries(A.TIMBRES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
+    const groups = {};
+    for (const [k, t] of Object.entries(A.INSTRUMENTS)) (groups[t.group] = groups[t.group] || []).push(`<option value="${k}">${t.label}</option>`);
+    selT.innerHTML = Object.entries(groups).map(([g, o]) => `<optgroup label="${g}">${o.join('')}</optgroup>`).join('');
     selT.value = s.tlTimbre;
-    selT.addEventListener('change', () => { s.tlTimbre = selT.value; app.syncToneLab(); saveSettings(s); });
+    const showInstrument = () => {
+      const t = A.INSTRUMENTS[s.tlTimbre];
+      $('tlAbout').innerHTML = `<b>${t.label}</b> — ${t.about}`;
+      for (const id of ['tlHarm', 'tlInh']) {
+        $(id).disabled = !t.pure;
+        $(id).closest('label').classList.toggle('off', !t.pure);
+        $(id).closest('label').title = t.pure ? '' : 'Set by the instrument model (pure tones only)';
+      }
+      $('tlVib').disabled = !t.vibrato;
+      $('tlVib').closest('label').classList.toggle('off', !t.vibrato);
+      $('tlVib').closest('label').title = t.vibrato ? 'Vibrato and natural pitch drift. Turn off for exactly steady pitch.' : `${t.label} has no vibrato`;
+      $('tlRestrike').closest('label').classList.toggle('off', !t.decays);
+    };
+    showInstrument();
+    selT.addEventListener('change', () => { s.tlTimbre = selT.value; showInstrument(); app.syncToneLab(); saveSettings(s); });
+    for (const [id, key] of [['tlVib', 'tlVib'], ['tlRestrike', 'tlRestrike']]) {
+      const c = $(id); c.checked = s[key];
+      c.addEventListener('change', () => { s[key] = c.checked; app.syncToneLab(); saveSettings(s); });
+    }
     const h = $('tlHarm'); h.value = s.tlHarm; $('tlHarmOut').textContent = s.tlHarm;
     h.addEventListener('input', () => { s.tlHarm = +h.value; $('tlHarmOut').textContent = s.tlHarm; });
     h.addEventListener('change', () => { app.syncToneLab(); saveSettings(s); });
@@ -618,7 +654,7 @@
   function bindKeys() {
     const map = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11, k: 12 };
     document.addEventListener('keydown', e => {
-      if (e.target.matches('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      if ((e.target.matches && e.target.matches('input, select, textarea')) || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
       if (e.code === 'Space') { e.preventDefault(); toggleFreeze(); return; }
       if (!$('toneLab').hidden && e.key.toLowerCase() in map) { app.toggleStep(map[e.key.toLowerCase()]); return; }
       if (e.key === 'm' || e.key === 'M') toggleMic();
