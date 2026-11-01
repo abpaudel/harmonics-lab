@@ -50,7 +50,7 @@ a { color: var(--accent); }
   position: sticky; top: 0; z-index: 20;
 }
 .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
-.brand svg { width: 30px; height: 30px; }
+.brand img { width: 30px; height: 30px; display: block; }
 .brand h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
 .brand .tag { font-size: 11px; color: var(--text-3); letter-spacing: .6px; text-transform: uppercase; }
 

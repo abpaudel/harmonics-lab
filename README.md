@@ -1,16 +1,17 @@
-# Harmonics Lab
+<p align="center">
+  <img src="img/icons/icon.svg" width="128" alt="Harmonics Lab icon">
+</p>
+
+<h1 align="center">Harmonics Lab</h1>
 
 A static HTML/CSS/JS instrument for studying the **harmonic series**, **consonance & dissonance**, and **tuning systems** of any sound, live from your microphone, a built-in tone generator or an audio file. It has no build step, no dependencies and no network access.
 
 ## Run it
 
-- **Simplest:** open `index.html` in Firefox or Chrome (double-click). Allow the microphone when asked.
-- **If the mic is refused on `file://`** (some browser settings block it), serve the folder locally:
-  ```sh
-  cd harmonics && python3 -m http.server 8000
-  # then open http://localhost:8000
-  ```
-- Validation suite: open `tests/tests.html` (or run `node tests/tests.js`).
+Serve the folder with any static web server (microphone access needs
+`localhost` or HTTPS), for example `python3 -m http.server`, then open `http://localhost:8000`.
+
+Live demo is hosted at: https://abpaudel.com/harmonics-lab/
 
 ## What you see
 
