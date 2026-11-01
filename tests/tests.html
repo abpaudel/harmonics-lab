@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harmonics Lab Tests</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #0b0e14; color: #e6ebf5; font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 24px 16px; }
+    main { max-width: 980px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p { color: #a5b0c4; margin: 0 0 16px; }
+    #summary { font-size: 16px; font-weight: 600; margin: 12px 0; }
+    .ok { color: #5ee39a; } .bad { color: #ff5f6d; }
+    ol { padding-left: 22px; }
+    li { margin: 4px 0; }
+    .detail { color: #6d7891; font: 12px ui-monospace, Menlo, monospace; display: block; overflow-wrap: anywhere; }
+    a { color: #5fd4ff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Harmonics Lab — validation suite</h1>
+    <p>Synthesises signals with known frequencies, runs them through the exact analysis code the app uses, and checks the results. <a href="../index.html">← back to the app</a></p>
+    <div id="summary">Running…</div>
+    <ol id="list"></ol>
+  </main>
+  <script src="../js/dsp.js"></script>
+  <script src="../js/pitch.js"></script>
+  <script src="../js/music.js"></script>
+  <script src="../js/dissonance.js"></script>
+  <script>
+    setTimeout(() => {
+      const s = document.createElement('script');
+      s.src = 'tests.js';
+      s.onload = () => {
+        const r = self.TEST_RESULTS || [];
+        const passed = r.filter(x => x.ok).length;
+        const sum = document.getElementById('summary');
+        sum.textContent = `${passed} / ${r.length} passed`;
+        sum.className = passed === r.length ? 'ok' : 'bad';
+        document.getElementById('list').innerHTML = r.map(x =>
+          `<li><span class="${x.ok ? 'ok' : 'bad'}">${x.ok ? '✔' : '✘'}</span> ${x.name.replace(/</g, '&lt;')}<span class="detail">${String(x.detail).replace(/</g, '&lt;')}</span></li>`).join('');
+      };
+      document.body.appendChild(s);
+    }, 30);
+  </script>
+</body>
+</html>

@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Harmonics Lab</title>
+  <meta name="description" content="See the harmonic series, consonance and dissonance of any sound in real time.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311161f'/%3E%3Cg stroke-linecap='round' stroke-width='2.4'%3E%3Cpath d='M6 26V6' stroke='%235fd4ff'/%3E%3Cpath d='M12 26V13' stroke='%23ffb35c'/%3E%3Cpath d='M17 26V17' stroke='%23c792ff'/%3E%3Cpath d='M21 26V19' stroke='%2378e08f'/%3E%3Cpath d='M24.5 26V20.5' stroke='%23ff7aa8'/%3E%3Cpath d='M27.5 26V21.5' stroke='%23ffe066'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><g stroke-linecap="round" stroke-width="2.6"><path d="M6 26V6" stroke="#5fd4ff"/><path d="M12 26V13" stroke="#ffb35c"/><path d="M17 26V17" stroke="#c792ff"/><path d="M21 26V19" stroke="#78e08f"/><path d="M24.5 26V20.5" stroke="#ff7aa8"/><path d="M27.5 26V21.5" stroke="#ffe066"/></g></svg>
+      <div><h1>Harmonics Lab</h1><span class="tag">harmonics · consonance · tuning</span></div>
+    </div>
+
+    <div class="sources" role="group" aria-label="Sound sources">
+      <button id="btnMic" class="src-btn" aria-pressed="false" title="Analyse the microphone (M)">
+        <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 17v4m-3 0h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>Microphone</span>
+      </button>
+      <button id="btnTone" class="src-btn" aria-pressed="false" title="Built-in tone generator: play notes &amp; chords in any tuning (T)">
+        <svg viewBox="0 0 24 24"><path d="M3 5h18v14H3zM7.5 5v8M12 5v8M16.5 5v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span>Tone Lab</span>
+      </button>
+      <label class="src-btn" title="Analyse an audio file (loops)">
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 18a3 3 0 1 1-3-3 3 3 0 0 1 3 3Zm11-2a3 3 0 1 1-3-3 3 3 0 0 1 3 3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span id="fileLabel">File</span>
+        <input id="fileInput" type="file" accept="audio/*" hidden>
+      </label>
+      <button id="btnFreeze" class="src-btn" aria-pressed="false" title="Freeze the display to inspect it; also pauses a playing file (Space)">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <span>Freeze</span>
+      </button>
+    </div>
+
+    <div class="tonal">
+      <label>Sa / Key
+        <select id="selKey"></select>
+      </label>
+      <label>Tuning
+        <select id="selTuning"></select>
+      </label>
+      <label>A4
+        <input id="inpA4" type="number" min="400" max="480" step="0.1" value="440"><span class="unit">Hz</span>
+      </label>
+      <label class="check"><input id="chkSargam" type="checkbox" checked> Sargam</label>
+      <button id="btnSettings" class="icon-btn" title="Analysis &amp; display settings" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M4 6h10m4 0h2M4 12h4m4 0h8M4 18h12m4 0h0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="10" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Settings drawer -->
+  <aside id="settings" class="drawer" hidden>
+    <div class="drawer-head"><h2>Settings</h2><button class="icon-btn" data-close="settings" title="Close">✕</button></div>
+    <div class="drawer-body">
+      <fieldset>
+        <legend>Analysis</legend>
+        <label>FFT size
+          <select id="setFFT">
+            <option value="8192">8192 — fast (≈0.17 s)</option>
+            <option value="16384" selected>16384 — balanced (≈0.34 s)</option>
+            <option value="32768">32768 — fine detail (≈0.68 s)</option>
+          </select>
+        </label>
+        <p class="hint" id="resHint"></p>
+        <label>Window
+          <select id="setWindow">
+            <option value="hann">Hann — sharper peaks</option>
+            <option value="blackmanHarris">Blackman-Harris — cleaner floor (−92 dB side-lobes)</option>
+          </select>
+        </label>
+        <label>Peak threshold above noise floor <output id="outThresh">15 dB</output>
+          <input id="setThresh" type="range" min="6" max="40" step="1" value="15">
+        </label>
+        <label>Dynamic range <output id="outRange">60 dB</output>
+          <input id="setRange" type="range" min="30" max="90" step="5" value="60">
+        </label>
+        <label>Input gate (silence below) <output id="outGate">−70 dBFS</output>
+          <input id="setGate" type="range" min="-100" max="-30" step="1" value="-70">
+        </label>
+        <label class="check"><input id="setPoly" type="checkbox" checked> Detect multiple notes (chords)</label>
+        <label>Max notes <output id="outVoices">4</output>
+          <input id="setVoices" type="range" min="1" max="6" step="1" value="4">
+        </label>
+        <label>Lowest fundamental
+          <select id="setMinF0">
+            <option value="30">30 Hz (B0)</option><option value="50" selected>50 Hz (G1)</option><option value="70">70 Hz (C♯2)</option><option value="100">100 Hz (G2)</option>
+          </select>
+        </label>
+        <label>Display smoothing <output id="outSmooth">0.5</output>
+          <input id="setSmooth" type="range" min="0" max="0.95" step="0.05" value="0.5">
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Display</legend>
+        <label>Frequency range
+          <span class="row"><input id="setFMin" type="number" value="50" min="20" max="2000"> – <input id="setFMax" type="number" value="6000" min="200" max="20000"> Hz</span>
+        </label>
+        <label>Level floor <output id="outDbMin">−100 dB</output>
+          <input id="setDbMin" type="range" min="-130" max="-50" step="5" value="-100">
+        </label>
+        <label>Harmonics to show per note <output id="outHarm">16</output>
+          <input id="setHarm" type="range" min="4" max="32" step="1" value="16">
+        </label>
+        <label>Note spelling
+          <select id="setSpell"><option value="sharps">Sharps (C♯)</option><option value="flats">Flats (D♭)</option></select>
+        </label>
+        <label>Sargam script
+          <select id="setScript"><option value="latin">Latin (Sa Re Ga)</option><option value="deva">Devanagari (सा रे ग)</option></select>
+        </label>
+        <label>Sa fine-tune <output id="outSaFine">0 ¢</output>
+          <input id="setSaFine" type="range" min="-50" max="50" step="1" value="0">
+        </label>
+        <label class="check"><input id="setRoughStrip" type="checkbox" checked> Show roughness band under spectrum</label>
+        <label class="check"><input id="setTunedTicks" type="checkbox" checked> Show tuning-degree ticks on spectrum</label>
+      </fieldset>
+      <fieldset>
+        <legend>Microphone</legend>
+        <label>Input device <select id="setDevice"><option value="">Default</option></select></label>
+        <p class="hint" id="micInfo">Echo cancellation, noise suppression and automatic gain are requested <b>off</b> — they would distort the overtones.</p>
+      </fieldset>
+      <button id="btnReset" class="ghost">Reset all settings</button>
+    </div>
+  </aside>
+
+  <main class="layout">
+    <section class="stage">
+      <div class="panel spectrum-panel">
+        <div class="panel-head">
+          <h2>Spectrum <span class="sub">every peak named · coloured combs = harmonic series of each detected note</span></h2>
+          <div class="legend" id="spectrumLegend"></div>
+        </div>
+        <div class="canvas-wrap" id="spectrumWrap">
+          <canvas id="cvSpectrum" aria-label="Live frequency spectrum"></canvas>
+          <div class="empty-state" id="emptyState">
+            <p class="big">Play something.</p>
+            <p>Start the <b>Microphone</b> and play an instrument or sing — or open the <b>Tone Lab</b> to generate notes and chords in any tuning.</p>
+            <div class="empty-actions">
+              <button class="primary" data-action="mic">Start microphone</button>
+              <button data-action="tone">Open Tone Lab</button>
+            </div>
+          </div>
+          <div class="tooltip" id="tooltip" hidden></div>
+        </div>
+        <p class="canvas-hint">Scroll to zoom · drag to pan · double-click to reset · click a peak to pin its harmonic series · <kbd>Space</kbd> freeze</p>
+      </div>
+
+      <div class="panel tabs-panel">
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="ladder" aria-selected="true">Harmonic ladder</button>
+          <button role="tab" data-tab="overlap">Overtone overlap</button>
+          <button role="tab" data-tab="curve">Dissonance curve</button>
+          <button role="tab" data-tab="spectrogram">Spectrogram</button>
+          <button role="tab" data-tab="tuning">Tuning explorer</button>
+          <button role="tab" data-tab="guide">Guide</button>
+        </nav>
+
+        <div class="tab" data-tab="ladder">
+          <div class="tab-toolbar">
+            <span class="voice-pick" id="ladderVoices"></span>
+            <span class="tab-explain">Each bar is one partial. The table shows where each harmonic lands relative to the nearest note, and how far the measured partial sits from the exact multiple n×f₀.</span>
+          </div>
+          <div class="ladder-grid">
+            <div class="canvas-wrap short"><canvas id="cvLadder"></canvas></div>
+            <div class="table-wrap"><table class="data" id="ladderTable"></table></div>
+          </div>
+        </div>
+
+        <div class="tab" data-tab="overlap" hidden>
+          <div class="tab-toolbar">
+            <span class="tab-explain"><b class="ok">Green bars</b>: partials of different notes that coincide (they fuse — consonance). <b class="bad">Red bands</b>: partials close enough to beat (roughness — dissonance); the label shows the beat rate.</span>
+          </div>
+          <div class="canvas-wrap tall"><canvas id="cvOverlap"></canvas></div>
+        </div>
+
+        <div class="tab" data-tab="curve" hidden>
+          <div class="tab-toolbar">
+            <label>Timbre
+              <select id="curveTimbre">
+                <option value="live">Live: strongest detected note</option>
+                <option value="saw">Bright string (1/n, 8 partials)</option>
+                <option value="square">Clarinet (odd partials)</option>
+                <option value="sine">Sine (no overtones)</option>
+                <option value="stretched">Stretched partials (B = 0.003)</option>
+              </select>
+            </label>
+            <label>Span <select id="curveSpan"><option value="2.05">1 octave</option><option value="4.1">2 octaves</option></select></label>
+            <span class="tab-explain">Total roughness when this timbre sounds with a copy of itself at every interval (Plomp–Levelt / Sethares). Valleys are the consonances — they appear wherever partials coincide.</span>
+          </div>
+          <div class="canvas-wrap tall"><canvas id="cvCurve"></canvas></div>
+        </div>
+
+        <div class="tab" data-tab="spectrogram" hidden>
+          <div class="tab-toolbar"><span class="tab-explain">Time → (right is now). Log-frequency vertical axis with note names. Bright lines are partials; dots trace detected fundamentals.</span></div>
+          <div class="canvas-wrap tall"><canvas id="cvSpectrogram"></canvas></div>
+        </div>
+
+        <div class="tab" data-tab="tuning" hidden>
+          <div class="tab-toolbar">
+            <span class="tab-explain">Where each tuning system places the 12 degrees, in cents from Sa. Colour = offset from equal temperament: <b class="cents-neg">blue flat</b> · <b class="ok">green on</b> · <b class="cents-pos">orange sharp</b>. Click any table cell to hear Sa + that degree in that tuning.</span>
+          </div>
+          <div class="canvas-wrap tuning-strip"><canvas id="cvTuning"></canvas></div>
+          <div class="table-wrap"><table class="data tuning-table" id="tuningTable"></table></div>
+          <div class="tuning-about" id="tuningAbout"></div>
+        </div>
+
+        <div class="tab guide" data-tab="guide" hidden>
+          <div class="guide-cols">
+            <section>
+              <h3>What you are seeing</h3>
+              <p>A pitched sound is not one frequency. A string or air column vibrates at its <b>fundamental</b> f₀ and simultaneously at <b>2f₀, 3f₀, 4f₀…</b> — the <b>harmonic series</b>. Their relative strengths are the timbre. The spectrum shows every partial as a peak; the coloured comb above marks the harmonic numbers of each detected note.</p>
+              <p>Harmonics 1, 2, 4, 8 are octaves (Sa). 3 and 6 are Pa (a pure fifth, +2.0¢ from equal temperament). 5 is Ga (a pure major third, −13.7¢). 7 is a "natural" komal Ni, −31.2¢ — no piano key matches it. 11 sits almost exactly between Ma and tivra Ma. The <b>Harmonic ladder</b> tab lists all of this for whatever you play.</p>
+            </section>
+            <section>
+              <h3>Consonance, made visible</h3>
+              <p>When two notes sound together, their harmonic series interleave. If the frequency ratio is simple — 2:1, 3:2, 4:3, 5:4 — many partials land on <b>exactly</b> the same frequencies and fuse. Partials that land close but not together (within about a critical band) <b>beat</b>, which we hear as roughness.</p>
+              <p>Open <b>Overtone overlap</b> and play a fifth: green coincidences everywhere. Play a minor second: red beating bands. In equal temperament the fifth's 3rd/2nd harmonics are 0.9 Hz apart at C4 — a slow beat you can see in the interval card. Switch the Tone Lab to Just intonation and it vanishes.</p>
+            </section>
+            <section>
+              <h3>Tuning systems</h3>
+              <p><b>Equal temperament</b> divides the octave into 12 identical steps, so every key works but only the octave is pure. <b>Just intonation</b> takes intervals straight from the harmonic series (5/4, 3/2…) — perfectly beat-free chords, tied to one Sa, exactly like a tanpura-tuned raga. <b>Pythagorean</b> stacks pure fifths. <b>Meantone</b> and <b>Werckmeister</b> are historical compromises.</p>
+              <p>Choose a tuning at the top: note labels and cents then refer to that tuning's degrees, ticks on the spectrum show where its notes lie, and the Tone Lab plays in it.</p>
+            </section>
+            <section>
+              <h3>Tips for accurate readings</h3>
+              <ul>
+                <li>Use a quiet room and keep the mic 20–50 cm from the instrument. Avoid Bluetooth headsets (their codecs low-pass and distort).</li>
+                <li>Bigger FFT (Settings) = finer frequency resolution but slower response. 32768 separates partials only 3 Hz apart; 8192 follows fast melodies.</li>
+                <li>Pitch is refined from the phase advance between two overlapping frames: steady tones read to better than 0.1¢.</li>
+                <li>An octave above a sounding note can't be detected as a separate note: every partial coincides with the lower note's even harmonics. That perfect overlap <i>is</i> why the octave is the most consonant interval.</li>
+                <li>Freeze (<kbd>Space</kbd>) and hover the spectrum to read any peak exactly.</li>
+              </ul>
+            </section>
+          </div>
+          <p class="refs">Roughness model: Plomp &amp; Levelt (1965), parameterised by W. Sethares, <i>Tuning, Timbre, Spectrum, Scale</i> (2005). Multi-note detection: harmonic summation with iterative explanation (after A. Klapuri, 2006). Validation suite: <a href="tests/tests.html">tests/tests.html</a>.</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="panel notes-panel">
+        <div class="panel-head"><h2>Detected notes</h2><span class="level" id="levelMeter" title="Input level"><i></i></span></div>
+        <div id="noteCards" class="note-cards"><p class="muted">Waiting for sound…</p></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Intervals</h2></div>
+        <div id="intervalCards" class="interval-cards"><p class="muted">Play two or more notes.</p></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Roughness <span class="sub">sensory dissonance</span></h2><span class="rough-val" id="roughVal">–</span></div>
+        <div class="canvas-wrap spark"><canvas id="cvRough"></canvas></div>
+        <p class="hint">Sum of beating between every pair of partials, normalised to the loudest partial. 0 = smooth (pure tone, unison, octave).</p>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Tone Lab drawer -->
+  <section id="toneLab" class="tonelab" hidden>
+    <div class="tonelab-head">
+      <h2>Tone Lab</h2>
+      <label>Timbre <select id="tlTimbre"></select></label>
+      <label>Harmonics <output id="tlHarmOut">12</output><input id="tlHarm" type="range" min="1" max="24" value="12"></label>
+      <label>Inharmonicity <output id="tlInhOut">0</output><input id="tlInh" type="range" min="0" max="40" value="0" title="Stretch of upper partials, like stiff piano strings"></label>
+      <label>Octave <select id="tlOct"><option value="-1">Mandra (low)</option><option value="0" selected>Madhya (middle)</option><option value="1">Taar (high)</option></select></label>
+      <label class="check"><input id="tlMonitor" type="checkbox" checked> Speakers</label>
+      <button id="tlAllOff" class="ghost">All off</button>
+      <button id="tlCollapse" class="icon-btn" title="Collapse / expand the keyboard" aria-expanded="true">▾</button>
+      <button class="icon-btn" data-close="toneLab" title="Close Tone Lab (notes keep sounding until All off)">✕</button>
+    </div>
+    <div class="tonelab-presets" id="tlPresets"></div>
+    <div class="keyboard" id="keyboard"></div>
+    <p class="hint tl-hint">Click keys to latch notes on/off and build chords. Keys follow the selected <b>tuning</b> and <b>Sa</b>: change the tuning while a chord sounds and watch the beats appear or vanish. Computer keys <kbd>A</kbd>…<kbd>K</kbd> play Sa…taar Sa chromatically.</p>
+  </section>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="js/dsp.js"></script>
+  <script src="js/pitch.js"></script>
+  <script src="js/music.js"></script>
+  <script src="js/dissonance.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/views/spectrum.js"></script>
+  <script src="js/views/ladder.js"></script>
+  <script src="js/views/overlap.js"></script>
+  <script src="js/views/curve.js"></script>
+  <script src="js/views/spectrogram.js"></script>
+  <script src="js/views/tuning.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
