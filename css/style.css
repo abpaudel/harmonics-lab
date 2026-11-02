@@ -103,6 +103,9 @@ button.ghost:hover { color: var(--text); }
 }
 .stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.site-foot { margin: 0; padding: 0 4px; font-size: 12px; text-align: right; }
+.site-foot a { color: var(--text-3); text-decoration: none; }
+.site-foot a:hover { color: var(--text); }
 .panel {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 10px 12px 12px; min-width: 0;
@@ -301,6 +304,7 @@ legend { color: var(--accent); font-size: 12px; text-transform: uppercase; lette
 @media (max-width: 1100px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .site-foot { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
   .topbar { padding: 8px 16px; gap: 10px; }
