@@ -25,9 +25,9 @@
   const view = {
     init(app) {
       this.app = app;
-      this.cv = U.managedCanvas(document.getElementById('cvCurve'));
-      this.selTimbre = document.getElementById('curveTimbre');
-      this.selSpan = document.getElementById('curveSpan');
+      this.cv = U.managedCanvas(document.getElementById('cvDissonance'));
+      this.selTimbre = document.getElementById('dissonanceTimbre');
+      this.selSpan = document.getElementById('dissonanceSpan');
       this.selTimbre.addEventListener('change', () => { this._sig = null; app.requestRender(); });
       this.selSpan.addEventListener('change', () => { this._sig = null; app.requestRender(); });
       this.curve = null;
@@ -156,5 +156,5 @@
     },
   };
 
-  (root.HViews = root.HViews || {}).curve = view;
+  (root.HViews = root.HViews || {}).dissonance = view;
 })(typeof self !== 'undefined' ? self : this);

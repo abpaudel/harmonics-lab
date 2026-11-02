@@ -23,6 +23,7 @@ Live demo is hosted at: https://abpaudel.com/harmonics-lab/
 | **Harmonic ladder** | One note's partials as bars, and a table: interval above f₀, ratio, the harmonic's *natural* offset from ET (h5 = −13.7¢, h7 = −31.2¢, h11 = −48.7¢…), measured vs exact n·f₀ (inharmonicity), note, cents and svara. |
 | **Overtone overlap** | Each note's harmonic series in its own lane on a shared log-frequency axis. **Green links** mean coinciding partials (fusion, consonance). **Red bands** mean partials close enough to beat (roughness, dissonance), labelled with the beat rate. |
 | **Dissonance curve** | Plomp–Levelt/Sethares roughness of a timbre (live, or presets) against itself at every interval over 1–2 octaves. The valleys fall on 6/5, 5/4, 4/3, 3/2, 5/3, 2/1. The live intervals and the chosen tuning's degrees are marked on it. |
+| **Lissajous curve** | Two detected notes plotted against each other, the lower on X and the upper on Y, as on an oscilloscope in X–Y mode. A simple ratio p:q draws a closed figure that touches the sides q times and the top p times. A slightly mistuned ratio makes the figure turn, once per beat of the coinciding harmonics, so an equal-tempered fifth rolls slowly and a just one stands still. *Harmonograph* style draws a decaying trace like the pendulum machine, where mistuning shows as a rosette. The figure can use the fundamentals only or include the measured overtones. Partial phases aren't measured, so they're arbitrary. With one note it shows a phase portrait. |
 | **Spectrogram** | Scrolling time × log-frequency picture, with traces of the detected fundamentals. |
 | **Tuning explorer** | 12-TET, 5-limit Just, Pythagorean, ¼-comma Meantone, Werckmeister III, 7-limit, the 22 shrutis, and where harmonics 1–32 fall inside an octave. A table gives cents, ratios and offsets from ET; click a cell to hear Sa plus that degree in that tuning. |
 
@@ -83,7 +84,7 @@ js/dissonance.js    Plomp–Levelt / Sethares roughness & dissonance curves
 js/audio.js         mic / file / Tone Lab plumbing, capture worklet
 js/synth.js         Tone Lab instrument models (runs in an AudioWorklet)
 js/ui.js            drawing & formatting helpers
-js/views/*.js       spectrum, ladder, overlap, curve, spectrogram, tuning
+js/views/*.js       spectrum, ladder, overlap, dissonance, lissajous, spectrogram, tuning
 js/app.js           state, analysis loop, side panels, controls
 tests/              validation suite (tests.html in browser, tests.js in Node)
 ```

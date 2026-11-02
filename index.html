@@ -167,7 +167,8 @@
         <nav class="tabs" role="tablist">
           <button role="tab" data-tab="ladder" aria-selected="true">Harmonic ladder</button>
           <button role="tab" data-tab="overlap">Overtone overlap</button>
-          <button role="tab" data-tab="curve">Dissonance curve</button>
+          <button role="tab" data-tab="dissonance">Dissonance curve</button>
+          <button role="tab" data-tab="lissajous">Lissajous curve</button>
           <button role="tab" data-tab="spectrogram">Spectrogram</button>
           <button role="tab" data-tab="tuning">Tuning explorer</button>
           <button role="tab" data-tab="guide">Guide</button>
@@ -191,10 +192,10 @@
           <div class="canvas-wrap tall"><canvas id="cvOverlap"></canvas></div>
         </div>
 
-        <div class="tab" data-tab="curve" hidden>
+        <div class="tab" data-tab="dissonance" hidden>
           <div class="tab-toolbar">
             <label>Timbre
-              <select id="curveTimbre">
+              <select id="dissonanceTimbre">
                 <option value="live">Live: strongest detected note</option>
                 <option value="saw">Bright string (1/n, 8 partials)</option>
                 <option value="square">Clarinet (odd partials)</option>
@@ -202,10 +203,30 @@
                 <option value="stretched">Stretched partials (B = 0.003)</option>
               </select>
             </label>
-            <label>Span <select id="curveSpan"><option value="2.05">1 octave</option><option value="4.1">2 octaves</option></select></label>
+            <label>Span <select id="dissonanceSpan"><option value="2.05">1 octave</option><option value="4.1">2 octaves</option></select></label>
             <span class="tab-explain">Total roughness when this timbre sounds with a copy of itself at every interval (Plomp–Levelt / Sethares). Valleys are the consonances — they appear wherever partials coincide.</span>
           </div>
-          <div class="canvas-wrap tall"><canvas id="cvCurve"></canvas></div>
+          <div class="canvas-wrap tall"><canvas id="cvDissonance"></canvas></div>
+        </div>
+
+        <div class="tab" data-tab="lissajous" hidden>
+          <div class="tab-toolbar">
+            <span class="voice-pick" id="lissVoices" title="Pick the two notes to plot"></span>
+            <label>Style
+              <select id="lissStyle">
+                <option value="scope">Scope (live trace)</option>
+                <option value="harmonograph">Harmonograph (decaying)</option>
+              </select>
+            </label>
+            <label>Signal
+              <select id="lissSignal">
+                <option value="pure">Fundamentals only</option>
+                <option value="timbre">With measured overtones</option>
+              </select>
+            </label>
+            <span class="tab-explain">The lower note drives X, the upper note drives Y. A simple ratio such as 3:2 draws a closed figure. A slightly mistuned one turns, once per beat. Try the Fifth in equal temperament, then in Just intonation.</span>
+          </div>
+          <div class="canvas-wrap tall"><canvas id="cvLissajous" aria-label="Lissajous figure of two detected notes"></canvas></div>
         </div>
 
         <div class="tab" data-tab="spectrogram" hidden>
@@ -305,7 +326,8 @@
   <script src="js/views/spectrum.js"></script>
   <script src="js/views/ladder.js"></script>
   <script src="js/views/overlap.js"></script>
-  <script src="js/views/curve.js"></script>
+  <script src="js/views/dissonance.js"></script>
+  <script src="js/views/lissajous.js"></script>
   <script src="js/views/spectrogram.js"></script>
   <script src="js/views/tuning.js"></script>
   <script src="js/app.js"></script>

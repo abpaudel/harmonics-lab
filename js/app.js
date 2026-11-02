@@ -666,7 +666,7 @@
   function init() {
     app.updatePitchSpace();
     bindTopbar(); bindSettings(); bindTabs(); bindToneLab(); bindKeys();
-    for (const k of ['spectrum', 'ladder', 'overlap', 'curve', 'spectrogram', 'tuning']) V[k].init(app);
+    for (const k of ['spectrum', 'ladder', 'overlap', 'dissonance', 'lissajous', 'spectrogram', 'tuning']) V[k].init(app);
     app.configureAnalyzer();
     app.engine.onstate = () => app.requestRender();
     V.tuning.renderSlow(true);
