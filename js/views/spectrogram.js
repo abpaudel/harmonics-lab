@@ -1,6 +1,10 @@
 /*
  * Spectrogram: scrolling time × log-frequency image with note axis and traces of the
- * detected fundamentals. Keeps recording while hidden (cheap: one column per frame).
+ * detected fundamentals. Keeps recording while hidden (cheap: one column per analysis
+ * reading). Columns come at the analysis rate (≈ 60 per second, fixed by the audio hop,
+ * not the display), so the time axis is exact; a reading that stands for several hops
+ * (analysis fell behind) fills that many columns. Uses the unsmoothed spectrum, so
+ * the display smoothing does not blur it in time.
  */
 (function (root) {
   'use strict';
@@ -46,18 +50,19 @@
       this._range = null;
     },
 
-    /** Called every analysis frame. */
+    /** Called for every analysis reading. */
     push(frame) {
-      if (!frame || !frame.displayDb) return;
+      if (!frame || !frame.result || !frame.result.db) return;
+      this.rate = frame.rate;
       const s = this.app.settings, w = this.off.width, h = this.off.height;
       const key = s.fMin + '|' + s.fMax;
       if (this._range !== key) { // range changed: clear
         this._range = key; this.offCtx.fillStyle = '#000004'; this.offCtx.fillRect(0, 0, w, h);
       }
-      const c = this.offCtx;
-      c.drawImage(this.off, -1, 0);
+      const c = this.offCtx, n = Math.max(1, Math.min(w, frame.cols || 1));
+      c.drawImage(this.off, -n, 0);
       const sc = U.logScale(s.fMin, s.fMax, h - 1, 0);
-      const db = frame.displayDb, binHz = frame.result.binHz, data = this.col.data;
+      const db = frame.result.db, binHz = frame.result.binHz, data = this.col.data;
       const lo = s.dbMin, span = -lo;
       for (let y = 0; y < h; y++) {
         const fa = sc.from(y + 0.5), fb = sc.from(y - 0.5);
@@ -68,11 +73,11 @@
         const i = Math.round(t * 255) * 3, o = y * 4;
         data[o] = LUT[i]; data[o + 1] = LUT[i + 1]; data[o + 2] = LUT[i + 2]; data[o + 3] = 255;
       }
-      c.putImageData(this.col, w - 1, 0);
+      for (let i = 1; i <= n; i++) c.putImageData(this.col, w - i, 0);
       for (const v of frame.voices) {
         if (v.f0 < s.fMin || v.f0 > s.fMax) continue;
         c.fillStyle = v.color;
-        c.fillRect(w - 2, Math.round(sc.to(v.f0)) - 1, 2, 3);
+        c.fillRect(w - n - 1, Math.round(sc.to(v.f0)) - 1, n + 1, 3);
       }
     },
 
@@ -94,10 +99,10 @@
         ctx.fillText(ps.etNote(ps.freqOfMidi(m)).label, AX - 6, y);
         ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(AX, y - 0.5, 4, 1);
       }
-      const secs = this.off.width / 60;
+      const rate = this.rate || 60, secs = this.off.width / rate;
       ctx.fillStyle = U.C.text2; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
       for (let t = 0; t <= secs; t += secs > 20 ? 5 : 2) {
-        const x = AX + this.off.width - t * 60;
+        const x = AX + this.off.width - t * rate;
         ctx.textAlign = t === 0 ? 'right' : 'center';
         ctx.fillText(t === 0 ? 'now' : `−${t}s`, x, T + this.off.height + 3);
       }

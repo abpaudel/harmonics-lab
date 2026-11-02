@@ -1,27 +1,30 @@
 /*
  * audio.js — Web Audio plumbing.
- *  - A capture tap (AudioWorklet, with ScriptProcessor fallback) copies everything
- *    routed to `engine.input` into a ring buffer that the analyser reads.
+ *  - A capture tap (AudioWorklet, with ScriptProcessor fallback) streams everything
+ *    routed to `engine.input` to the analysis sink (see setSink): a MessagePort into
+ *    the analysis worker, which the worklet posts to directly, or a callback.
  *  - Sources: microphone (all browser processing disabled), the Tone Lab instrument
  *    synthesiser (models in synth.js), and audio files.
  */
 (function (root) {
   'use strict';
 
-  const RING = 1 << 17; // 131072 samples (~2.7 s at 48 kHz)
-
   const TAP_WORKLET = `
     class Tap extends AudioWorkletProcessor {
-      constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+      constructor() {
+        super(); this.buf = new Float32Array(1024); this.n = 0; this.out = null;
+        // { port }: post the audio there (the analysis worker) instead of to the main thread.
+        this.port.onmessage = e => { this.out = e.data.port || null; };
+      }
       process(inputs) {
-        // With nothing connected the input has zero channels; record silence anyway so the
-        // ring buffer does not keep the last sound forever.
+        // With nothing connected the input has zero channels; send silence anyway so the
+        // analysis does not keep the last sound forever.
         const ch = inputs[0] && inputs[0][0];
         const len = ch ? ch.length : 128;
         for (let i = 0; i < len; i++) {
           this.buf[this.n++] = ch ? ch[i] : 0;
           if (this.n === this.buf.length) {
-            this.port.postMessage(this.buf, [this.buf.buffer]);
+            (this.out || this.port).postMessage(this.buf, [this.buf.buffer]);
             this.buf = new Float32Array(1024); this.n = 0;
           }
         }
@@ -33,9 +36,7 @@
   class AudioEngine {
     constructor() {
       this.ctx = null;
-      this.ring = new Float32Array(RING);
-      this.writePos = 0;
-      this.totalWritten = 0;
+      this.sink = null;
       this.mic = null;
       this.file = null;
       this.onstate = () => {};
@@ -67,13 +68,6 @@
       const sink = ctx.createGain();
       sink.gain.value = 0;
       sink.connect(ctx.destination);
-      const push = data => {
-        const n = data.length, r = this.ring;
-        let p = this.writePos;
-        for (let i = 0; i < n; i++) { r[p] = data[i]; p = (p + 1) & (RING - 1); }
-        this.writePos = p;
-        this.totalWritten += n;
-      };
       try {
         if (!ctx.audioWorklet) throw new Error('no worklet');
         // Blob URLs are refused on file:// pages in Chrome (null origin); a data: URL works there.
@@ -84,29 +78,40 @@
           try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
         }
         const node = new AudioWorkletNode(ctx, 'harmonics-tap', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: 'explicit' });
-        node.port.onmessage = e => push(e.data);
+        this.tapNode = node;
         this.input.connect(node);
         node.connect(sink);
         this.tapKind = 'AudioWorklet';
       } catch (err) {
         this.tapError = String(err && err.message || err);
         const sp = ctx.createScriptProcessor(2048, 1, 1);
-        sp.onaudioprocess = e => push(e.inputBuffer.getChannelData(0));
+        this.tapSP = sp;
         this.input.connect(sp);
         sp.connect(sink);
         this.tapKind = 'ScriptProcessor';
       }
+      this._applySink();
     }
 
-    /** Copy the most recent n samples into `out` (Float32Array of length >= n). */
-    latest(n, out) {
-      const r = this.ring;
-      let p = (this.writePos - n + RING) & (RING - 1);
-      for (let i = 0; i < n; i++) { out[i] = r[p]; p = (p + 1) & (RING - 1); }
-      return out;
-    }
+    /**
+     * Where captured audio goes: { port } (a MessagePort; it is transferred to the
+     * worklet, so pass a fresh one each time) or { fn } (called with Float32Array chunks).
+     */
+    setSink(sink) { this.sink = sink; this._applySink(); }
 
-    clearRing() { this.ring.fill(0); }
+    _applySink() {
+      const s = this.sink;
+      if (!s) return;
+      if (this.tapNode) {
+        const port = this.tapNode.port;
+        if (s.port) { port.onmessage = null; port.postMessage({ port: s.port }, [s.port]); }
+        else { port.postMessage({ port: null }); port.onmessage = e => s.fn(e.data); }
+      } else if (this.tapSP) {
+        this.tapSP.onaudioprocess = s.port
+          ? e => s.port.postMessage(e.inputBuffer.getChannelData(0).slice())
+          : e => s.fn(e.inputBuffer.getChannelData(0));
+      }
+    }
 
     async startMic(deviceId) {
       await this.ensure();

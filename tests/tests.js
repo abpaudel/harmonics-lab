@@ -11,6 +11,7 @@
   const M = isNode ? require('../js/music.js') : self.HMusic;
   const X = isNode ? require('../js/dissonance.js') : self.HDiss;
   const S = isNode ? require('../js/synth.js') : self.HSynth;
+  const AN = isNode ? require('../js/analysis.js') : self.HAnalysis;
 
   const results = [];
   function test(name, fn) {
@@ -455,6 +456,67 @@
       return `peak-to-peak ${on.toFixed(1)}¢ with vibrato, ${off.toFixed(2)}¢ without`;
     });
   }
+
+  /* -------------------------------------------- Streaming analysis (analysis.js) */
+  // Feed `secs` of signal in uneven chunks while a fake wall clock advances in step with
+  // the audio. At `stallAt` the analysis thread is blocked for `stallMs`: the clock jumps
+  // ahead, then the audio that queued up meanwhile arrives at once (clock standing still).
+  function stream(parts, secs, { stallAt = -1, stallMs = 0, fft = 8192, chunkSeed = 7 } = {}) {
+    let clock = 0, cs = chunkSeed, burst = 0;
+    const frames = [];
+    const core = new AN.Core(f => frames.push(f), () => clock);
+    core.configure({ sampleRate: SR, fft, window: 'hann' });
+    core.setParams({ running: true, sourcesActive: true });
+    const x = D.synth(parts, Math.round(secs * SR), SR, 0.0005, 99);
+    let pos = 0, stalled = false;
+    while (pos < x.length) {
+      cs = (cs * 1103515245 + 12345) >>> 0;
+      const n = Math.min(x.length - pos, 128 + (cs % 1921));
+      if (!stalled && stallAt >= 0 && pos >= stallAt * SR) { clock += stallMs; burst = stallMs; stalled = true; }
+      const ms = n / SR * 1000;
+      if (burst > 0) burst -= ms; else clock += ms;
+      core.push(x.subarray(pos, pos + n));
+      pos += n;
+    }
+    return { core, frames, total: x.length };
+  }
+
+  test('Streaming analysis runs on a fixed hop (60 readings/s), independent of chunk sizes', () => {
+    const f0 = noteF(NOTE.A3);
+    const { core, frames, total } = stream(tone(f0, saw, 12), 2);
+    const hop = AN.hopFor(SR);
+    assert(hop === 800 && Math.abs(core.rate - 60) < 1e-9, `hop ${hop}, rate ${core.rate}`);
+    assert(frames.length === Math.floor(total / hop), `${frames.length} readings for ${total} samples`);
+    assert(frames.every(f => f.cols === 1), 'no reading may be skipped in real time');
+    for (let i = 1; i < frames.length; i++) assert(Math.abs(frames[i].time - frames[i - 1].time - hop / SR) < 1e-9, 'uneven spacing');
+    const late = frames.slice(30).map(f => f.voices.length === 1 ? f.voices[0].f0 : NaN);
+    late.forEach(f => near(f, f0, 0.05, 'f0'));
+    return `${frames.length} readings in 2 s, A3 within 0.05¢ in every settled reading`;
+  });
+
+  test('Streaming analysis skips readings when it falls behind, and the skipped hops are counted', () => {
+    const { frames, total } = stream(tone(220, saw, 8), 3, { stallAt: 1, stallMs: 600 });
+    const hop = AN.hopFor(SR), hops = Math.floor(total / hop);
+    const cols = frames.reduce((a, f) => a + f.cols, 0);
+    const gap = Math.max(...frames.map(f => f.cols));
+    assert(cols === hops, `columns ${cols} vs hops ${hops}`);
+    assert(gap > 20 && gap < 50, `skipped ${gap - 1} readings for a 0.6 s stall`);
+    return `one reading covers ${gap} hops after the stall; columns add up to ${hops}`;
+  });
+
+  test('Paused analysis produces nothing and resumes on the newest audio (no catch-up)', () => {
+    const frames = [];
+    const core = new AN.Core(f => frames.push(f), () => 0);
+    core.configure({ sampleRate: SR, fft: 4096, window: 'hann' });
+    core.setParams({ running: false, sourcesActive: true });
+    const chunk = new Float32Array(1000);
+    for (let i = 0; i < 48; i++) core.push(chunk);
+    assert(frames.length === 0, 'reading while paused');
+    core.setParams({ running: true });
+    for (let i = 0; i < 4; i++) core.push(chunk);
+    assert(frames.length === 5 && frames.every(f => f.cols === 1), `${frames.length} readings after resume`);
+    return '0 readings while paused, 5 for 4000 samples after resuming';
+  });
 
   /* ------------------------------------------------------------------ Report */
   const passed = results.filter(r => r.ok).length;

@@ -47,19 +47,20 @@ All models run in an AudioWorklet. Every note sounds at exactly the requested fr
 
 ## How the analysis works (and how accurate it is)
 
-1. **Capture.** An AudioWorklet (ScriptProcessor fallback) copies raw samples into a ring buffer. The mic is opened with echo cancellation, noise suppression and auto-gain **off**, and the app tells you if the browser refused.
+1. **Capture.** An AudioWorklet (ScriptProcessor fallback) streams raw samples straight to a **Web Worker** that runs the whole analysis, so heavy FFTs never stall the display. The worker takes one reading every 1/60 s *of audio* (a fixed hop of samples, not tied to the screen's frame rate), which makes the spectrogram's time axis exact. If analysis falls behind, it skips readings rather than lagging further, and the spectrogram fills in the skipped time. Where workers are unavailable (e.g. Chrome on `file://`), the same code runs on the main thread. The mic is opened with echo cancellation, noise suppression and auto-gain **off**, and the app tells you if the browser refused.
 2. **Spectrum.** Two overlapping frames (offset by ¼ window) are windowed (Hann or Blackman-Harris) and packed into **one complex FFT**.
 3. **Peak frequency.** This comes from the **phase-vocoder method**: the phase advance of each peak between the two frames gives its true frequency. On synthetic tones the worst-case error is **≈0.02 cents** (parabolic interpolation would give ~1–2¢). Peak level is corrected for scalloping with the window's analytic kernel (error < 0.01 dB).
 4. **Peaks** are kept when they exceed a local, median-like noise floor by the threshold (default 15 dB, chosen from the noise statistics), and window side-lobes are rejected.
 5. **Notes.** Notes are found by harmonic summation with iterative explanation, after Klapuri. Candidates are peaks and their sub-multiples. Each candidate's series is tracked upward by **extrapolating the measured partial spacing**, so stretched piano partials are followed with a tight tolerance. Missing low harmonics are penalised, and sub-octave "ghost" notes and vibrato sidebands are rejected.
 6. **Roughness** is the Sethares (1993) parameterisation of Plomp & Levelt, summed over all partial pairs and normalised to the loudest partial.
 
-### Validation (`tests/tests.html`, 60 checks)
+### Validation (`tests/tests.html`, 63 checks)
 
 - Pure tones at 300 random frequencies: worst error 0.016¢, 0.003 dB (Hann) and 0.017¢, 0.007 dB (Blackman-Harris).
 - Single notes E2–C6 with sawtooth, odd-only, sine, weak-fundamental and bright spectra: all within 0.02¢.
 - Chords: fifths (ET and just), 3rds, 4th, tritone, minor/major 2nd, major/minor triads (ET and just 4:5:6), wide spacings. Each is detected exactly, and no note may claim a partial off its own series.
 - Stiff strings (B = 0.0004 and 0.001, partials stretched up to 290¢) are fully tracked. Singer vibrato (±17¢) gives one note and no ghosts.
+- Streaming: readings come every 800 samples at 48 kHz (60/s) whatever the chunk sizes, a stall skips readings and counts the skipped time, and resuming after a pause starts on the newest audio.
 - Music theory: note naming, cents, sargam with saptak, just/Werckmeister degrees (A stays at 440), sargam-aware spelling, compound intervals, harmonic offsets.
 - Roughness: maximum at ~¼ critical band; dissonance-curve minima at 6/5, 5/4, 4/3, 3/2, 5/3, 2/1; m2 > M2 > ET M3 > just M3 > ET P5 > just P5 > octave.
 - Tone Lab: all 23 instruments, rendered offline by the same engine, are detected as exactly one note at G3, C4 and A4 (worst error ≈0.6¢). Just triads on piano, harmonium, sitar and violin resolve to three notes. Piano partials stretch as the model's B predicts. Clarinet odd harmonics are >10 dB above even ones. The sitar's jawari keeps h10–h20 more than 6 dB stronger than the same string without it. Tanpura strings are plucked in turn. Violin vibrato swings about ±15¢ and the pitch is steady with vibrato off.
@@ -79,6 +80,8 @@ index.html          app shell
 css/style.css       styling
 js/dsp.js           FFT, windows, peak detection, phase-vocoder refinement
 js/pitch.js         multi-note fundamental detection
+js/analysis.js      fixed-hop streaming pipeline (spectrum → notes → roughness) and its client
+js/analysis-worker.js  runs analysis.js in a Web Worker
 js/music.js         tunings, note names, sargam, shrutis, intervals
 js/dissonance.js    Plomp–Levelt / Sethares roughness & dissonance curves
 js/audio.js         mic / file / Tone Lab plumbing, capture worklet

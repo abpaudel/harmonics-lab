@@ -3,7 +3,7 @@
  */
 (function (root) {
   'use strict';
-  const D = root.HDSP, P = root.HPitch, M = root.HMusic, X = root.HDiss, A = root.HAudio, U = root.HUI, V = root.HViews;
+  const M = root.HMusic, X = root.HDiss, A = root.HAudio, U = root.HUI, V = root.HViews, AN = root.HAnalysis;
   const $ = id => document.getElementById(id);
 
   const DEFAULTS = {
@@ -77,13 +77,12 @@
   const app = {
     settings: loadSettings(),
     engine: new A.AudioEngine(),
-    analyzer: null,
+    analysis: null,
     frame: null,
     frozen: false,
     pins: [],
     tracker: new VoiceTracker(),
-    roughHist: new Float32Array(600),
-    roughEma: 0,
+    roughHist: new Float32Array(600), // 10 s of readings
     activeTab: 'ladder',
     get sampleRate() { return this.engine.sampleRate; },
 
@@ -93,13 +92,32 @@
     },
     updatePitchSpace() { this.ps = new M.PitchSpace(this.psOptions()); },
 
+    /** Analysis runs in a Web Worker (main-thread fallback) on a fixed hop; see analysis.js. */
+    startAnalysis() {
+      const an = this.analysis = new AN.Client(f => this.onFrame(f), 'js/analysis-worker.js');
+      this.engine.setSink(an.sink());
+      an.onSinkChange(() => { this.engine.setSink(an.sink()); this.configureAnalyzer(); });
+    },
+
     configureAnalyzer() {
+      const s = this.settings, sr = this.sampleRate;
+      this.analysis.configure({ sampleRate: sr, fft: s.fft, window: s.window });
+      this._cfgRate = sr;
+      this._sentParams = null; // resend everything after a reset
+      const hop = s.fft / 4, need = s.fft + hop, rate = sr / AN.hopFor(sr);
+      $('resHint').textContent = `Bin spacing ${(sr / s.fft).toFixed(2)} Hz · window ${(s.fft / sr * 1000).toFixed(0)} ms (+${(hop / sr * 1000).toFixed(0)} ms phase frame) · ${(need / sr).toFixed(2)} s of audio per reading · ${rate.toFixed(0)} readings/s · sample rate ${sr} Hz` +
+        (this.engine.tapKind ? ` · capture: ${this.engine.tapKind}` : '') + ` · analysis: ${this.analysis.kind}`;
+    },
+
+    /** Push detection parameters and the run state to the analysis when they change. */
+    syncAnalysis(running) {
       const s = this.settings;
-      this.analyzer = new D.Analyzer({ sampleRate: this.sampleRate, fftSize: s.fft, windowType: s.window });
-      this.buf = new Float32Array(this.analyzer.samplesNeeded);
-      this.displayDb = null;
-      const bin = this.sampleRate / s.fft, dur = this.analyzer.samplesNeeded / this.sampleRate;
-      $('resHint').textContent = `Bin spacing ${bin.toFixed(2)} Hz · window ${(s.fft / this.sampleRate * 1000).toFixed(0)} ms (+${(this.analyzer.hop / this.sampleRate * 1000).toFixed(0)} ms phase frame) · ${dur.toFixed(2)} s of audio per reading · sample rate ${this.sampleRate} Hz` + (this.engine.tapKind ? ` · capture: ${this.engine.tapKind}` : '');
+      const p = {
+        thresh: s.thresh, range: s.range, gate: s.gate, poly: s.poly, maxVoices: s.maxVoices, minF0: s.minF0,
+        maxHarm: s.maxHarm, fMax: s.fMax, smooth: s.smooth, running, sourcesActive: this.sourcesActive(),
+      };
+      const key = JSON.stringify(p);
+      if (key !== this._sentParams) { this._sentParams = key; this.analysis.setParams(p); }
     },
 
     requestRender() { this._needsRender = true; },
@@ -118,38 +136,16 @@
     },
 
     /* --------------------------------------------------------- Analysis */
-    analyse() {
-      const s = this.settings, an = this.analyzer, e = this.engine;
-      if (!an || an.sampleRate !== this.sampleRate) this.configureAnalyzer();
-      this.engine.latest(this.analyzer.samplesNeeded, this.buf);
-      const nyq = this.sampleRate / 2;
-      const r = this.analyzer.process(this.buf, {
-        minFreq: 25, maxFreq: Math.min(nyq * 0.95, Math.max(s.fMax * 1.05, 12000)),
-        thresholdDb: s.thresh, rangeDb: s.range + 10, maxPeaks: 150,
-      });
-      const silent = r.rmsDb < s.gate || !this.sourcesActive();
-      const peaks = silent ? [] : r.peaks;
-      // display spectrum (smoothed copy)
-      if (!this.displayDb || this.displayDb.length !== r.db.length) this.displayDb = Float32Array.from(r.db);
-      else {
-        const a = s.smooth, d = this.displayDb, src = r.db;
-        for (let k = 0; k < d.length; k++) d[k] = a * d[k] + (1 - a) * src[k];
-      }
-      const raw = P.detectVoices(peaks, { polyphonic: s.poly, maxVoices: s.maxVoices, minF0: s.minF0, dynamicDb: s.range, maxHarmonics: Math.max(32, s.maxHarm) });
-      let voices = this.tracker.update(raw);
-      voices = voices.concat(this.pinnedVoices(peaks, voices));
-      // roughness of the whole sound, amplitudes relative to the loudest partial
-      let maxAmp = 0;
-      for (const p of peaks) if (p.amp > maxAmp) maxAmp = p.amp;
-      const parts = peaks.map(p => ({ freq: p.freq, amp: maxAmp ? p.amp / maxAmp : 0 }));
-      const total = parts.length ? X.totalRoughness(parts) : 0;
-      this.roughEma = this.roughEma * 0.85 + total * 0.15;
-      this.roughHist.copyWithin(0, 1); this.roughHist[this.roughHist.length - 1] = this.roughEma;
-      this.frame = {
-        result: { ...r, peaks }, displayDb: this.displayDb, voices, silent,
-        roughness: this.roughEma, roughPairs: parts.length ? X.roughPairs(parts, 80, 0.005) : [],
-        level: r.peakAbs,
-      };
+    /** One analysis reading from the worker (or the fallback in this thread). */
+    onFrame(f) {
+      if (this.frozen || f.result.sampleRate !== this._cfgRate) return; // in flight from before a freeze / reset
+      let voices = this.tracker.update(f.voices);
+      voices = voices.concat(this.pinnedVoices(f.result.peaks, voices));
+      const h = this.roughHist, k = Math.min(f.cols, h.length);
+      h.copyWithin(0, k); h.fill(f.roughness, h.length - k);
+      this.frame = { ...f, voices };
+      V.spectrogram.push(this.frame);
+      this._needsRender = true;
     },
 
     pinnedVoices(peaks, auto) {
@@ -180,13 +176,10 @@
       // fill with silence and the smoothed curve to settle, so the old spectrum fades out.
       if (active) this._idleSince = null;
       else if (this.engine.ctx && this._idleSince == null) this._idleSince = ts;
-      const winMs = this.analyzer ? this.analyzer.samplesNeeded / this.sampleRate * 1000 : 0;
+      const winMs = this.settings.fft * 1.25 / this.sampleRate * 1000;
       const tail = this._idleSince != null && ts - this._idleSince < winMs + 2000;
-      if (fresh || (this.engine.ctx && !this.frozen && ((this.frame && !this.frame.silent) || tail))) {
-        this.analyse();
-        if (!this._lastPush || ts - this._lastPush >= 16) { V.spectrogram.push(this.frame); this._lastPush = ts; }
-        this._needsRender = true;
-      }
+      if (this.engine.ctx && this._cfgRate !== this.sampleRate) this.configureAnalyzer();
+      this.syncAnalysis(!!(fresh || (this.engine.ctx && !this.frozen && ((this.frame && !this.frame.silent) || tail))));
       $('emptyState').hidden = !!(active || !$('toneLab').hidden || this.frame && !this.frame.silent);
       if (this._needsRender) {
         this._needsRender = false;
@@ -667,6 +660,7 @@
     app.updatePitchSpace();
     bindTopbar(); bindSettings(); bindTabs(); bindToneLab(); bindKeys();
     for (const k of ['spectrum', 'ladder', 'overlap', 'dissonance', 'lissajous', 'spectrogram', 'tuning']) V[k].init(app);
+    app.startAnalysis();
     app.configureAnalyzer();
     app.engine.onstate = () => app.requestRender();
     V.tuning.renderSlow(true);
