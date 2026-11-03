@@ -1294,7 +1294,7 @@
 
     const META = {};
     for (const [k, s] of Object.entries(INSTRUMENTS)) {
-      META[k] = { label: s.label, group: s.group, about: s.about, pure: !!s.pure, decays: !!(s.struck || s.kind === 'string' || s.kind === 'modal'), vibrato: !!(s.trem || s.vib && (s.vib.depth || s.vib.amp || s.vib.drift)), symp: !!s.symp, inharmonic: !!s.inharmonic, ref: s.ref || 1, pattern: !!s.pattern };
+      META[k] = { label: s.label, group: s.group, about: s.about, pure: !!s.pure, shaped: !!s.pure && s.src !== PURE.sine, decays: !!(s.struck || s.kind === 'string' || s.kind === 'modal'), vibrato: !!(s.trem || s.vib && (s.vib.depth || s.vib.amp || s.vib.drift)), symp: !!s.symp, inharmonic: !!s.inharmonic, ref: s.ref || 1, pattern: !!s.pattern };
     }
     return { Engine, INSTRUMENTS: META, _specs: INSTRUMENTS, stringLoop };
   }

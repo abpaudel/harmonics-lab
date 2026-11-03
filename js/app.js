@@ -604,9 +604,9 @@
       const t = A.INSTRUMENTS[s.tlTimbre];
       $('tlAbout').innerHTML = `<b>${t.label}</b> — ${t.about}`;
       for (const id of ['tlHarm', 'tlInh']) {
-        $(id).disabled = !t.pure;
-        $(id).closest('label').classList.toggle('off', !t.pure);
-        $(id).closest('label').title = t.pure ? '' : 'Set by the instrument model (pure tones only)';
+        $(id).disabled = !t.shaped;
+        $(id).closest('label').classList.toggle('off', !t.shaped);
+        $(id).closest('label').title = t.shaped ? '' : t.pure ? 'A sine has no overtones to shape' : 'Set by the instrument model (pure tones only)';
       }
       $('tlVib').disabled = !t.vibrato;
       $('tlVib').closest('label').classList.toggle('off', !t.vibrato);
