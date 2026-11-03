@@ -344,9 +344,9 @@
   /* --------------------------------------------------------- Tone Lab synth */
   if (S) {
     /** Render an instrument offline through the same engine the AudioWorklet runs. */
-    function play(inst, notes, secs, { vibrato = false, restrike = true, symp } = {}) {
+    function play(inst, notes, secs, { vibrato = false, restrike = true, symp, vel } = {}) {
       const e = new S.Engine(SR, 4242);
-      e.handle({ t: 'opts', vibrato, restrike });
+      e.handle({ t: 'opts', vibrato, restrike, ...(vel != null ? { vel } : {}) });
       if (symp) e.handle({ t: 'symp', freqs: symp });
       notes.forEach((f, id) => e.handle({ t: 'on', id, freq: f, inst, nHarm: 12, inharm: 0 }));
       const n = Math.round(secs * SR), out = new Float32Array(n);
@@ -361,11 +361,26 @@
     const levelAt = (r, f) => { const p = r.peaks.filter(q => Math.abs(q.freq / f - 1) < 0.012); return p.length ? Math.max(...p.map(q => q.db)) : -150; };
 
     const scale = [NOTE.G3, NOTE.C4, NOTE.A4].map(noteF);
-    test(`Every Tone Lab instrument (${Object.keys(S.INSTRUMENTS).length}) sounds exactly one note at the requested pitch (G3, C4, A4)`, () => {
+    const harmonicInsts = Object.keys(S.INSTRUMENTS).filter(k => !S.INSTRUMENTS[k].inharmonic);
+    const inharmonicInsts = Object.keys(S.INSTRUMENTS).filter(k => S.INSTRUMENTS[k].inharmonic);
+    /** Hann-windowed level (dB) of one frequency in a short window centred at t. */
+    const levelNear = (x, f, t, win = 0.04) => {
+      const N = Math.round(win * SR), s0 = Math.max(0, Math.round(t * SR) - (N >> 1));
+      let re = 0, im = 0, ws = 0;
+      for (let i = 0; i < N; i++) {
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)), v = x[s0 + i] * w, ph = 2 * Math.PI * f * i / SR;
+        re += v * Math.cos(ph); im -= v * Math.sin(ph); ws += w;
+      }
+      return 20 * Math.log10(2 * Math.hypot(re, im) / ws + 1e-12);
+    };
+    const rmsDb = x => { let e = 0; for (const v of x) e += v * v; return 10 * Math.log10(e / x.length); };
+
+    test(`Every harmonic Tone Lab instrument (${harmonicInsts.length}) sounds exactly one note at the requested pitch (G3, C4, A4)`, () => {
       const worst = [];
-      for (const inst of Object.keys(S.INSTRUMENTS)) {
+      for (const inst of harmonicInsts) {
         for (const f of scale) {
-          const x = play(inst, [f], 1.3);
+          // (a rhythm such as the tabla theka is checked on a single stroke)
+          const x = play(inst, [f], 1.3, { restrike: !S.INSTRUMENTS[inst].pattern });
           let pk = 0;
           for (const v of x) { assert(Number.isFinite(v), `${inst}: non-finite sample`); pk = Math.max(pk, Math.abs(v)); }
           assert(pk > 0.02 && pk < 0.95, `${inst} @ ${f.toFixed(1)} Hz: peak ${pk.toFixed(3)}`);
@@ -375,6 +390,116 @@
         }
       }
       return `max error ${Math.max(...worst).toFixed(2)}¢ over ${worst.length} notes`;
+    });
+
+    test(`Inharmonic instruments (${inharmonicInsts.length}: bells, bars, bowl, tines) ring their reference mode at exactly the requested pitch`, () => {
+      const worst = [];
+      for (const inst of inharmonicInsts) {
+        const ref = S.INSTRUMENTS[inst].ref;
+        for (const f of scale) {
+          const x = play(inst, [f], 1.3);
+          let pk = 0;
+          for (const v of x) { assert(Number.isFinite(v), `${inst}: non-finite sample`); pk = Math.max(pk, Math.abs(v)); }
+          assert(pk > 0.02 && pk < 0.95, `${inst} @ ${f.toFixed(1)} Hz: peak ${pk.toFixed(3)}`);
+          const { r } = analyseAt(x, 1.2, 32768);
+          const p = r.peaks.filter(q => Math.abs(cents(q.freq, ref * f)) < 20).sort((a, b) => b.db - a.db)[0];
+          assert(p, `${inst} @ ${f.toFixed(1)} Hz: no partial at ${ref}·f0`);
+          near(p.freq, ref * f, 1.5, `${inst} @ ${f.toFixed(1)} Hz`);
+          worst.push(Math.abs(cents(p.freq, ref * f)));
+        }
+      }
+      return `max error ${Math.max(...worst).toFixed(2)}¢ over ${worst.length} notes`;
+    });
+
+    test('Church bell: the tierce is a minor third above the prime, the hum an octave below; the hum outlasts the nominal', () => {
+      const f0 = noteF(NOTE.C4), x = play('churchBell', [f0], 3, { restrike: false });
+      const { r } = analyseAt(x, 1.0, 32768);
+      const tierce = r.peaks.filter(q => Math.abs(cents(q.freq, 1.2 * f0)) < 20)[0];
+      assert(tierce, 'no tierce'); near(tierce.freq, 1.2 * f0, 6, 'tierce');
+      const drop = h => levelNear(x, h * f0, 0.3, 0.2) - levelNear(x, h * f0, 2.7, 0.2);
+      assert(drop(0.5) < drop(2) - 10, `hum fell ${drop(0.5).toFixed(1)} dB, nominal ${drop(2).toFixed(1)} dB`);
+      return `tierce ${cents(tierce.freq, f0).toFixed(0)}¢ above the prime; hum −${drop(0.5).toFixed(0)} dB vs nominal −${drop(2).toFixed(0)} dB over 2.4 s`;
+    });
+
+    test('Tubular bells: the strike note is a virtual pitch: nothing at f0, strong partials near 2·f0, 3·f0, 4·f0', () => {
+      const f0 = noteF(NOTE.C4), x = play('tubularBells', [f0], 1, { restrike: false });
+      const at = h => levelNear(x, h * f0, 0.6, 0.2);
+      const series = [2, 2.987, 4.173].map(at), atF0 = at(1);
+      assert(Math.min(...series) - atF0 > 25, `f0 ${atF0.toFixed(0)} dB, series ${series.map(Math.round)}`);
+      return `at f0 ${atF0.toFixed(0)} dB; 2/3/4·f0 ${series.map(Math.round).join('/')} dB`;
+    });
+
+    test('Steel pan: the octave swells after the strike (quadratic coupling), more when struck harder', () => {
+      const f0 = noteF(NOTE.E4);
+      const oct = vel => { const x = play('steelpan', [f0], 0.4, { restrike: false, vel }); return [0.01, 0.1].map(t => levelNear(x, 2 * f0, t, 0.02) - levelNear(x, f0, t, 0.02)); };
+      const mf = oct(0.7), ff = oct(1);
+      assert(mf[1] - mf[0] > 6, `octave re fundamental ${mf.map(v => v.toFixed(1))} dB`);
+      assert(ff[1] > mf[1] + 3, `ff ${ff[1].toFixed(1)} dB vs mf ${mf[1].toFixed(1)} dB`);
+      return `octave re h1: ${mf[0].toFixed(0)} → ${mf[1].toFixed(0)} dB (mf), ${ff[1].toFixed(0)} dB at 100 ms (ff)`;
+    });
+
+    test('Dynamics: ff is louder and brighter than pp (piano hammer, guitar pluck, trumpet, marimba mallet); mf is the calibrated level', () => {
+      const out = [];
+      for (const [inst, h, f0] of [['piano', 8, noteF(NOTE.C4)], ['guitar', 8, noteF(NOTE.G3)], ['trumpet', 8, noteF(NOTE.C4)], ['marimba', 4, noteF(NOTE.C4)]]) {
+        const m = vel => { const x = play(inst, [f0], 0.5, { restrike: false, vel }); return { lvl: rmsDb(x), bright: levelNear(x, h * f0, 0.3, 0.1) - levelNear(x, f0, 0.3, 0.1) }; };
+        const pp = m(0.3), ff = m(1);
+        assert(ff.lvl - pp.lvl > 8, `${inst}: level pp ${pp.lvl.toFixed(1)} ff ${ff.lvl.toFixed(1)}`);
+        assert(ff.bright - pp.bright > 4, `${inst}: h${h} re h1 pp ${pp.bright.toFixed(1)} ff ${ff.bright.toFixed(1)}`);
+        out.push(`${inst} +${(ff.lvl - pp.lvl).toFixed(0)} dB, h${h} +${(ff.bright - pp.bright).toFixed(0)} dB`);
+      }
+      const a = play('violin', [noteF(NOTE.A4)], 0.5), b = play('violin', [noteF(NOTE.A4)], 0.5, { vel: 0.7 });
+      assert(a.every((v, i) => v === b[i]), 'default velocity is not mf');
+      return out.join('; ');
+    });
+
+    test('CPU: 6 voices of every instrument render faster than 4× real time', () => {
+      const slow = [];
+      let worst = 0;
+      for (const inst of Object.keys(S.INSTRUMENTS)) {
+        const fs = [0, 4, 7, 12, 16, 19].map(st => noteF(NOTE.C3) * Math.pow(2, st / 12));
+        const t0 = Date.now();
+        play(inst, fs, 1, { vibrato: true, symp: [262, 294, 330, 349, 392, 440, 494] });
+        const rt = (Date.now() - t0) / 1000;
+        worst = Math.max(worst, rt);
+        if (rt > 0.25) slow.push(`${inst} ${(rt * 1000).toFixed(0)} ms`);
+      }
+      assert(!slow.length, 'too slow: ' + slow.join(', '));
+      return `slowest: ${(worst * 1000).toFixed(0)} ms per second of 6-voice audio`;
+    });
+
+    test('Tabla bols: Tin damps the dayan fundamental that Na rings; Dha adds the bayan, Ta does not; the theka cycles 16 matras', () => {
+      const f0 = noteF(NOTE.C4), spec = S._specs.tabla, period = spec.restrike;
+      const x = play('tabla', [f0], 16 * period + 0.2);
+      const at = (k, r) => levelNear(x, r * f0, k * period + 0.06, 0.05);
+      const pat = spec.pattern, idx = b => pat.indexOf(b);
+      const fundNa = at(idx('Dha'), 1) - at(idx('Dha'), 2), fundTin = at(idx('Tin'), 1) - at(idx('Tin'), 2);
+      assert(fundNa - fundTin > 10, `h1 re h2: Na ${fundNa.toFixed(1)} dB, Tin ${fundTin.toFixed(1)} dB`);
+      const bayanDha = at(0, 0.375), bayanTa = at(pat.lastIndexOf('Ta') + 1 - 1, 0.375);
+      assert(bayanDha - bayanTa > 20, `bayan on Dha ${bayanDha.toFixed(0)} dB, on Ta ${bayanTa.toFixed(0)} dB`);
+      const sam2 = at(16, 0.375);
+      assert(sam2 > bayanTa + 20, 'the cycle does not return to Dha on sam');
+      return `h1 re h2: Na ${fundNa.toFixed(0)} dB, Tin ${fundTin.toFixed(0)} dB; bayan Dha ${bayanDha.toFixed(0)} dB, Ta ${bayanTa.toFixed(0)} dB`;
+    });
+
+    test('Two string polarisations: a guitar note decays fast at first, then slower (two-stage decay)', () => {
+      const f0 = noteF(NOTE.G3), x = play('guitar', [f0], 3.6, { restrike: false });
+      const L = t => levelNear(x, f0, t, 0.2);
+      const early = (L(0.2) - L(0.7)) / 0.5, late = (L(2.6) - L(3.4)) / 0.8;
+      assert(late < 0.75 * early, `early ${early.toFixed(1)} dB/s, late ${late.toFixed(1)} dB/s`);
+      return `fundamental falls ${early.toFixed(1)} dB/s early, ${late.toFixed(1)} dB/s late`;
+    });
+
+    test('Shimmer: with natural fluctuation on, a steady clarinet\'s partial levels wander a little; off, they are constant', () => {
+      const f0 = noteF(NOTE.G3);
+      const spread = vibrato => {
+        const x = play('clarinet', [f0], 2.2, { vibrato }), v = [];
+        for (let t = 0.8; t < 2.1; t += 0.05) v.push(levelNear(x, 3 * f0, t, 0.05));
+        const m = v.reduce((p, q) => p + q, 0) / v.length;
+        return Math.sqrt(v.reduce((p, q) => p + (q - m) * (q - m), 0) / v.length);
+      };
+      const on = spread(true), off = spread(false);
+      assert(on > 0.2 && on < 2 && off < 0.05, `h3 level spread ${on.toFixed(2)} dB on, ${off.toFixed(3)} dB off`);
+      return `h3 level spread ${on.toFixed(2)} dB with fluctuation, ${off.toFixed(3)} dB without`;
     });
 
     test('Instrument chords: a just C major triad on piano, harmonium, sitar and violin resolves to its three notes', () => {
@@ -421,6 +546,19 @@
       try { without = hi('sitar'); } finally { spec.jaw = jaw; }
       assert(withJ - without > 6, `with ${withJ.toFixed(1)} dB, without ${without.toFixed(1)} dB`);
       return `h10–20 energy ${withJ.toFixed(1)} dB vs ${without.toFixed(1)} dB re h1`;
+    });
+
+    test('Sitar matches a measured recording: bridge formant near 3.3 kHz above a 2.3 kHz dip, slow decay', () => {
+      // from Commons "Sitar clipping.ogg" (D4): h10–h12 (~3.3 kHz) stand above h8
+      // (~2.3 kHz) and within ~15–20 dB of h1; the note loses only ~5 dB/s
+      const f0 = noteF(NOTE.D4), x = play('sitar', [f0], 2.2, { restrike: false });
+      const at = h => levelNear(x, h * f0, 0.15) - levelNear(x, f0, 0.15);
+      const dip = at(8), bump = Math.max(at(10), at(11), at(12));
+      const seg = t => rmsDb(x.subarray(Math.round(t * SR), Math.round((t + 0.1) * SR)));
+      const decay = (seg(0.2) - seg(2.0)) / 1.8;
+      assert(bump - dip > 4 && bump > -22, `h8 ${dip.toFixed(1)} dB, h10–12 ${bump.toFixed(1)} dB re h1`);
+      assert(decay < 9, `decay ${decay.toFixed(1)} dB/s`);
+      return `h8 ${dip.toFixed(0)} dB, h10–12 ${bump.toFixed(0)} dB re h1; decay ${decay.toFixed(1)} dB/s`;
     });
 
     test('Tanpura plucks latched strings one at a time, in turn (first string at once, then the next two ~1 s apart)', () => {

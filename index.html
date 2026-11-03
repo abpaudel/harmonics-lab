@@ -304,8 +304,9 @@
       <label>Instrument <select id="tlTimbre"></select></label>
       <label>Harmonics <output id="tlHarmOut">12</output><input id="tlHarm" type="range" min="1" max="24" value="12"></label>
       <label>Inharmonicity <output id="tlInhOut">0</output><input id="tlInh" type="range" min="0" max="40" value="0" title="Stretch of upper partials, like stiff piano strings"></label>
+      <label title="How hard notes are played: louder is also brighter (hammer, pluck, mallet, breath). mf is the calibrated level.">Dynamics <output id="tlDynOut">mf</output><input id="tlDyn" type="range" min="0" max="5" step="1" value="3"></label>
       <label>Octave <select id="tlOct"><option value="-1">Low (mandra)</option><option value="0" selected>Middle (madhya)</option><option value="1">High (taar)</option></select></label>
-      <label class="check" title="Vibrato and natural pitch drift. Turn off for exactly steady pitch."><input id="tlVib" type="checkbox" checked> Vibrato</label>
+      <label class="check" title="Vibrato and natural fluctuation of pitch and partial levels. Turn off for an exactly steady tone."><input id="tlVib" type="checkbox" checked> Vibrato</label>
       <label class="check" title="Keep re-plucking / re-striking latched notes of decaying instruments (piano, guitar, sitar, tanpura…)"><input id="tlRestrike" type="checkbox" checked> Re-strike</label>
       <label class="check"><input id="tlMonitor" type="checkbox" checked> Speakers</label>
       <button id="tlAllOff" class="ghost">All off</button>

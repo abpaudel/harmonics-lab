@@ -215,6 +215,7 @@
       this.out = ctx.createGain();
       this.out.gain.value = 1;
       outputs.forEach(o => this.out.connect(o));
+      this.vel = 0.7;
       this.notes = new Map(); // id -> {freq}
       this.timbre = 'saw';
       this.nHarm = 12;
@@ -251,7 +252,7 @@
       this.setOptions();
     }
 
-    setOptions() { this.send({ t: 'opts', vibrato: this.vibrato, restrike: this.restrike }); }
+    setOptions() { this.send({ t: 'opts', vibrato: this.vibrato, restrike: this.restrike, vel: this.vel }); }
 
     /** Tune the shared sympathetic strings (sitar taraf, sarangi) to these frequencies. */
     setSympathetic(freqs) { this.send({ t: 'symp', freqs }); }

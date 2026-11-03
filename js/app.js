@@ -10,9 +10,11 @@
     fft: 16384, window: 'hann', thresh: 15, range: 60, gate: -70, poly: true, maxVoices: 4, minF0: 50, smooth: 0.5,
     fMin: 50, fMax: 6000, dbMin: -100, maxHarm: 16, spell: 'sharps', script: 'latin', saFine: 0,
     roughStrip: true, tunedTicks: true, tonicPc: 0, tuning: 'et', a4: 440, sargam: true, device: '',
-    tlTimbre: 'saw', tlHarm: 12, tlInh: 0, tlOct: 0, tlMonitor: true, tlVib: true, tlRestrike: true,
+    tlTimbre: 'saw', tlHarm: 12, tlInh: 0, tlOct: 0, tlMonitor: true, tlVib: true, tlRestrike: true, tlDyn: 3,
   };
   const STORE = 'harmonics-lab-settings-v1';
+  // Tone Lab dynamics: marking → velocity (0.7 = mf, the level every model is calibrated at)
+  const DYNAMICS = [['pp', 0.25], ['p', 0.4], ['mp', 0.55], ['mf', 0.7], ['f', 0.85], ['ff', 1]];
 
   function loadSettings() {
     let saved = {};
@@ -22,6 +24,7 @@
     // timbres from before the instrument models
     s.tlTimbre = { reed: 'harmonium', pluck: 'guitar' }[s.tlTimbre] || s.tlTimbre;
     if (!A.INSTRUMENTS[s.tlTimbre]) s.tlTimbre = DEFAULTS.tlTimbre;
+    if (!(s.tlDyn >= 0 && s.tlDyn < DYNAMICS.length)) s.tlDyn = DEFAULTS.tlDyn;
     return s;
   }
   function saveSettings(s) { try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e) { /* storage unavailable */ } }
@@ -172,12 +175,16 @@
       requestAnimationFrame(t => this.tick(t));
       const active = this.engine.ctx && this.sourcesActive();
       const fresh = active && !this.frozen;
-      // After the last source stops, keep analysing long enough for the analysis window to
-      // fill with silence and the smoothed curve to settle, so the old spectrum fades out.
-      if (active) this._idleSince = null;
+      // After the last source stops, keep analysing while its sound is still visible on
+      // the spectrum (a released bell, a sitar's sympathetic strings or a room ring on for
+      // seconds), then long enough for the analysis window to fill with silence and the
+      // smoothed curve to settle, so the old spectrum fades out instead of freezing.
+      const r = this.frame && this.frame.result;
+      const ringing = !!(r && r.rmsDb >= Math.min(this.settings.gate, this.settings.dbMin) - 10);
+      if (active || ringing) this._idleSince = null;
       else if (this.engine.ctx && this._idleSince == null) this._idleSince = ts;
       const winMs = this.settings.fft * 1.25 / this.sampleRate * 1000;
-      const tail = this._idleSince != null && ts - this._idleSince < winMs + 2000;
+      const tail = this._idleSince == null ? ringing : ts - this._idleSince < winMs + 2000;
       if (this.engine.ctx && this._cfgRate !== this.sampleRate) this.configureAnalyzer();
       this.syncAnalysis(!!(fresh || (this.engine.ctx && !this.frozen && ((this.frame && !this.frame.silent) || tail))));
       $('emptyState').hidden = !!(active || !$('toneLab').hidden || this.frame && !this.frame.silent);
@@ -366,7 +373,8 @@
       // harmonics / inharmonicity only shape the pure tones; instruments model their own
       const changed = tl.timbre !== s.tlTimbre || (pure && (tl.nHarm !== s.tlHarm || tl.inharm !== s.tlInh * 2.5e-5));
       tl.timbre = s.tlTimbre; tl.nHarm = s.tlHarm; tl.inharm = s.tlInh * 2.5e-5;
-      if (tl.vibrato !== s.tlVib || tl.restrike !== s.tlRestrike) { tl.vibrato = s.tlVib; tl.restrike = s.tlRestrike; tl.setOptions(); }
+      const vel = DYNAMICS[s.tlDyn][1];
+      if (tl.vibrato !== s.tlVib || tl.restrike !== s.tlRestrike || tl.vel !== vel) { tl.vibrato = s.tlVib; tl.restrike = s.tlRestrike; tl.vel = vel; tl.setOptions(); }
       if (!this._sympTuned) this.tuneSympathetic();
       if (changed) tl.refresh();
       this.engine.setMonitor(s.tlMonitor);
@@ -602,7 +610,7 @@
       }
       $('tlVib').disabled = !t.vibrato;
       $('tlVib').closest('label').classList.toggle('off', !t.vibrato);
-      $('tlVib').closest('label').title = t.vibrato ? 'Vibrato and natural pitch drift. Turn off for exactly steady pitch.' : `${t.label} has no vibrato`;
+      $('tlVib').closest('label').title = t.vibrato ? 'Vibrato and natural fluctuation of pitch and partial levels. Turn off for an exactly steady tone.' : `${t.label} has no vibrato`;
       $('tlRestrike').closest('label').classList.toggle('off', !t.decays);
     };
     showInstrument();
@@ -619,6 +627,11 @@
     inhTxt();
     ih.addEventListener('input', () => { s.tlInh = +ih.value; inhTxt(); });
     ih.addEventListener('change', () => { app.syncToneLab(); saveSettings(s); });
+    const dy = $('tlDyn'); dy.value = s.tlDyn;
+    const dynTxt = () => { $('tlDynOut').textContent = DYNAMICS[s.tlDyn][0]; };
+    dynTxt();
+    dy.addEventListener('input', () => { s.tlDyn = +dy.value; dynTxt(); app.syncToneLab(); });
+    dy.addEventListener('change', () => saveSettings(s));
     const oc = $('tlOct'); oc.value = s.tlOct;
     oc.addEventListener('change', () => { s.tlOct = +oc.value; app.retuneToneLab(); app.buildKeyboard(); saveSettings(s); });
     const mon = $('tlMonitor'); mon.checked = s.tlMonitor;
